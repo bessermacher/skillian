@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg18
+    container_name: skillian-postgres
+    environment:
+      POSTGRES_USER: skillian
+      POSTGRES_PASSWORD: skillian
+      POSTGRES_DB: skillian
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U skillian -d skillian"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
