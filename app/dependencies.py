@@ -8,12 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.sessions import SessionStore
 from app.config import get_settings
-from app.connectors import Connector, create_connector
+from app.connectors import Connector, create_business_connector, create_connector
 from app.core import Agent, SkillRegistry
 from app.db.connection import get_db_session
 from app.llm import LLMProvider, create_llm_provider
 from app.rag import RAGManager, VectorStore, create_embeddings
-from app.skills import FinancialSkill
+from app.skills import BusinessSkill, FinancialSkill
 
 
 @lru_cache
@@ -40,10 +40,15 @@ def get_connector() -> Connector:
 def get_skill_registry() -> SkillRegistry:
     """Get cached skill registry with all skills registered."""
     registry = SkillRegistry()
-    connector = get_connector()
+    settings = get_settings()
 
-    # Register skills
-    registry.register(FinancialSkill(connector))
+    # Financial skill uses mock connector (for development)
+    mock_connector = create_connector(settings)
+    registry.register(FinancialSkill(mock_connector))
+
+    # Business skill uses PostgreSQL connector
+    business_connector = create_business_connector(settings)
+    registry.register(BusinessSkill(business_connector))
 
     return registry
 

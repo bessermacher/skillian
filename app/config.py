@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "postgresql+asyncpg://skillian:skillian@localhost:5432/skillian"
 
+    # Business Database (SAP BW data)
+    business_database_url: str = "postgresql://business:business@localhost:5433/business_db"
+
     @property
     def is_development(self) -> bool:
         return self.env == "development"
