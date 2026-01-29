@@ -1,6 +1,6 @@
-"""Skills module - domain-specific capabilities."""
+"""Skills module - domain-specific capabilities.
 
-from app.skills.business import BusinessSkill
-from app.skills.financial import FinancialSkill
+Skills will be added as implementation progresses.
+"""
 
-__all__ = ["BusinessSkill", "FinancialSkill"]
+__all__: list[str] = []

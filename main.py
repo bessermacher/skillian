@@ -9,7 +9,6 @@ from app.api import router
 from app.config import get_settings
 from app.db import init_db
 from app.dependencies import (
-    get_connector,
     get_llm_provider,
     get_rag_manager,
     get_skill_registry,
@@ -22,7 +21,6 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     provider = get_llm_provider()
     registry = get_skill_registry()
-    connector = get_connector()
 
     print(f"Starting {settings.app_name} v{settings.app_version}")
 
@@ -31,7 +29,6 @@ async def lifespan(app: FastAPI):
     print("Database initialized")
     print(f"Environment: {settings.env}")
     print(f"LLM Provider: {provider.provider_name} ({provider.model_name})")
-    print(f"Connector: {connector.name}")
     print(f"Skills registered: {registry.skill_count}")
     print(f"Tools available: {registry.tool_count}")
 

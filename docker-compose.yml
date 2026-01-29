@@ -8,11 +8,27 @@ services:
       LLM_PROVIDER: ollama
       OLLAMA_BASE_URL: http://host.docker.internal:11434
       DATABASE_URL: postgresql+asyncpg://skillian:skillian@postgres:5432/skillian
+      BUSINESS_DATABASE_URL: postgresql://business:business@business-db:5432/business_db
     ports:
       - "8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
+      business-db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  ui:
+    build: .
+    container_name: skillian-ui
+    command: ["uv", "run", "streamlit", "run", "ui/chat.py", "--server.address", "0.0.0.0"]
+    environment:
+      BACKEND_URL: http://app:8000
+      STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false"
+    ports:
+      - "8501:8501"
+    depends_on:
+      - app
     restart: unless-stopped
 
   postgres:
@@ -42,7 +58,7 @@ services:
     ports:
       - "5433:5432"
     volumes:
-      - business_db_data:/var/lib/postgresql/data
+      - business_db_data:/var/lib/postgresql
       - ./database/init.sql:/docker-entrypoint-initdb.d/01-init.sql
       - ./database/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql
     healthcheck:

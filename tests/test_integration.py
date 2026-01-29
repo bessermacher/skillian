@@ -11,17 +11,18 @@ class TestFullChatFlow:
     def mock_agent_response(self):
         """Standard mock agent response."""
         response = MagicMock()
-        response.content = "The budget for CC-1001 is $500,000"
+        response.content = "I analyzed the data and found the results."
         response.tool_calls_made = [
             {
-                "tool": "get_cost_center",
-                "args": {"cost_center_id": "CC-1001"},
-                "result": '{"budget": 500000}',
+                "tool": "query_source",
+                "args": {"source": "test_source"},
+                "result": '{"rows": 10}',
             }
         ]
         response.finished = True
         return response
 
+    @pytest.mark.integration
     @patch("app.dependencies.get_agent")
     def test_chat_with_tool_execution(self, mock_get_agent, client, mock_agent_response):
         """Test chat that triggers tool execution."""
@@ -31,27 +32,27 @@ class TestFullChatFlow:
 
         response = client.post(
             "/chat",
-            json={"message": "What is the budget for CC-1001?"},
+            json={"message": "Query the test source"},
         )
 
         assert response.status_code == 200
         data = response.json()
-        assert "budget" in data["response"].lower() or "500" in data["response"]
         assert len(data["tool_calls"]) == 1
-        assert data["tool_calls"][0]["tool"] == "get_cost_center"
+        assert data["tool_calls"][0]["tool"] == "query_source"
 
+    @pytest.mark.integration
     @patch("app.dependencies.get_agent")
     def test_session_conversation_flow(self, mock_get_agent, client):
         """Test multi-turn conversation in a session."""
         # First message response
         first_response = MagicMock()
-        first_response.content = "I found 3 cost centers."
+        first_response.content = "I found some data."
         first_response.tool_calls_made = []
         first_response.finished = True
 
         # Second message response
         second_response = MagicMock()
-        second_response.content = "CC-1001 has a budget of $500,000."
+        second_response.content = "Here are more details."
         second_response.tool_calls_made = []
         second_response.finished = True
 
@@ -62,7 +63,7 @@ class TestFullChatFlow:
         # Create session with first message
         response1 = client.post(
             "/sessions",
-            json={"message": "List all cost centers"},
+            json={"message": "Show me the data"},
         )
         assert response1.status_code == 200
         session_id = response1.json()["session_id"]
@@ -71,46 +72,13 @@ class TestFullChatFlow:
         # Continue with second message
         response2 = client.post(
             f"/sessions/{session_id}/chat",
-            json={"message": "Tell me about the first one"},
+            json={"message": "Tell me more about it"},
         )
         assert response2.status_code == 200
         assert response2.json()["session_id"] == session_id
 
 
-class TestSkillIntegration:
-    """Test skill registration and tool execution."""
-
-    def test_financial_skill_registered(self, client):
-        """Verify financial skill is properly registered."""
-        response = client.get("/skills")
-        assert response.status_code == 200
-
-        data = response.json()
-        skill_names = [s["name"] for s in data["skills"]]
-        assert "financial" in skill_names
-
-    def test_financial_skill_has_expected_tools(self, client):
-        """Verify financial skill has all expected tools."""
-        response = client.get("/skills")
-        data = response.json()
-
-        financial_skill = next(
-            s for s in data["skills"] if s["name"] == "financial"
-        )
-
-        tool_names = [t["name"] for t in financial_skill["tools"]]
-        expected_tools = [
-            "get_cost_center",
-            "list_cost_centers",
-            "get_profit_center",
-            "search_transactions",
-            "compare_budget",
-        ]
-
-        for tool in expected_tools:
-            assert tool in tool_names, f"Missing tool: {tool}"
-
-
+@pytest.mark.integration
 class TestErrorHandling:
     """Test error handling throughout the application."""
 
@@ -139,6 +107,7 @@ class TestErrorHandling:
 class TestHealthAndDiagnostics:
     """Test health and diagnostic endpoints."""
 
+    @pytest.mark.integration
     def test_health_returns_all_fields(self, client):
         """Verify health check returns all expected fields."""
         response = client.get("/health")
@@ -159,6 +128,7 @@ class TestHealthAndDiagnostics:
         for field in required_fields:
             assert field in data, f"Missing field: {field}"
 
+    @pytest.mark.integration
     def test_skills_endpoint_structure(self, client):
         """Verify skills endpoint returns proper structure."""
         response = client.get("/skills")
@@ -167,9 +137,3 @@ class TestHealthAndDiagnostics:
         data = response.json()
         assert "skills" in data
         assert isinstance(data["skills"], list)
-
-        if data["skills"]:
-            skill = data["skills"][0]
-            assert "name" in skill
-            assert "description" in skill
-            assert "tools" in skill

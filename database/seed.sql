@@ -341,6 +341,179 @@ INSERT INTO bpc_reporting (
  'G7100000', 'FIN', 'CONS_ADJ', 'MANUAL', -1200.00, -1200.00);
 
 -- ============================================================================
+-- DUPLICATE TRANSACTIONS SCENARIO - December 2024 (Period 012)
+-- This simulates a data quality issue where invoices were loaded twice
+-- due to a delta load failure causing a full reload with existing data
+-- ============================================================================
+
+-- Company 1000 - December duplicate invoice postings
+-- Invoice 5000001 - ABC Corp (DUPLICATED - loaded twice)
+INSERT INTO fi_reporting (
+    fiscper, fiscvarnt, ac_docln, acledger, ac_docnr, rectype, version, compcode,
+    custpsg, salesorg, division, distchan, pst_date, calyear, calmonth, fiscyear,
+    chrt_acs, gl_acct, ac_docno, doc_date, ac_doctp, prof_ctr, segment,
+    funcarea, customer, material, fidbcrin, curkey_lc, cs_trn_lc, amnt_dc,
+    doc_currcy, quantity, unit, postxt
+) VALUES
+-- First occurrence of Invoice 5000001 (original load)
+('2024012', 'K4', '001', '0L', '5000001', '0', 'ACTUAL', '1000',
+ 'CUST_ABC', '1000', '01', '10', '2024-12-15', '2024', '202412', '2024',
+ 'CAGR', '4000000', '5000001', '2024-12-15', 'DR', 'PC1001', 'SEG01',
+ 'SALES', 'CUST_ABC', 'MAT001', 'S', 'EUR', 50000.00, 50000.00,
+ 'EUR', 200.000, 'PC', 'Invoice ABC Corp - Product A'),
+
+('2024012', 'K4', '002', '0L', '5000001', '0', 'ACTUAL', '1000',
+ 'CUST_ABC', '1000', '01', '10', '2024-12-15', '2024', '202412', '2024',
+ 'CAGR', '1400000', '5000001', '2024-12-15', 'DR', 'PC1001', 'SEG01',
+ 'SALES', 'CUST_ABC', 'MAT001', 'H', 'EUR', -50000.00, -50000.00,
+ 'EUR', -200.000, 'PC', 'AR - Invoice ABC Corp'),
+
+-- DUPLICATE: Second occurrence of Invoice 5000001 (reload due to delta failure)
+('2024012', 'K4', '001', '0L', '5000001', '1', 'ACTUAL', '1000',
+ 'CUST_ABC', '1000', '01', '10', '2024-12-15', '2024', '202412', '2024',
+ 'CAGR', '4000000', '5000001', '2024-12-15', 'DR', 'PC1001', 'SEG01',
+ 'SALES', 'CUST_ABC', 'MAT001', 'S', 'EUR', 50000.00, 50000.00,
+ 'EUR', 200.000, 'PC', 'Invoice ABC Corp - Product A'),
+
+('2024012', 'K4', '002', '0L', '5000001', '1', 'ACTUAL', '1000',
+ 'CUST_ABC', '1000', '01', '10', '2024-12-15', '2024', '202412', '2024',
+ 'CAGR', '1400000', '5000001', '2024-12-15', 'DR', 'PC1001', 'SEG01',
+ 'SALES', 'CUST_ABC', 'MAT001', 'H', 'EUR', -50000.00, -50000.00,
+ 'EUR', -200.000, 'PC', 'AR - Invoice ABC Corp'),
+
+-- Invoice 5000002 - XYZ Inc (DUPLICATED - loaded twice)
+-- First occurrence
+('2024012', 'K4', '001', '0L', '5000002', '0', 'ACTUAL', '1000',
+ 'CUST_XYZ', '1000', '01', '10', '2024-12-20', '2024', '202412', '2024',
+ 'CAGR', '4000000', '5000002', '2024-12-20', 'DR', 'PC1001', 'SEG01',
+ 'SALES', 'CUST_XYZ', 'MAT002', 'S', 'EUR', 25000.00, 25000.00,
+ 'EUR', 100.000, 'PC', 'Invoice XYZ Inc - Product B'),
+
+('2024012', 'K4', '002', '0L', '5000002', '0', 'ACTUAL', '1000',
+ 'CUST_XYZ', '1000', '01', '10', '2024-12-20', '2024', '202412', '2024',
+ 'CAGR', '1400000', '5000002', '2024-12-20', 'DR', 'PC1001', 'SEG01',
+ 'SALES', 'CUST_XYZ', 'MAT002', 'H', 'EUR', -25000.00, -25000.00,
+ 'EUR', -100.000, 'PC', 'AR - Invoice XYZ Inc'),
+
+-- DUPLICATE: Second occurrence of Invoice 5000002
+('2024012', 'K4', '001', '0L', '5000002', '1', 'ACTUAL', '1000',
+ 'CUST_XYZ', '1000', '01', '10', '2024-12-20', '2024', '202412', '2024',
+ 'CAGR', '4000000', '5000002', '2024-12-20', 'DR', 'PC1001', 'SEG01',
+ 'SALES', 'CUST_XYZ', 'MAT002', 'S', 'EUR', 25000.00, 25000.00,
+ 'EUR', 100.000, 'PC', 'Invoice XYZ Inc - Product B'),
+
+('2024012', 'K4', '002', '0L', '5000002', '1', 'ACTUAL', '1000',
+ 'CUST_XYZ', '1000', '01', '10', '2024-12-20', '2024', '202412', '2024',
+ 'CAGR', '1400000', '5000002', '2024-12-20', 'DR', 'PC1001', 'SEG01',
+ 'SALES', 'CUST_XYZ', 'MAT002', 'H', 'EUR', -25000.00, -25000.00,
+ 'EUR', -100.000, 'PC', 'AR - Invoice XYZ Inc'),
+
+-- Invoice 5000003 - DEF Ltd (NOT duplicated - clean data for comparison)
+('2024012', 'K4', '001', '0L', '5000003', '0', 'ACTUAL', '1000',
+ 'CUST_DEF', '1000', '01', '10', '2024-12-22', '2024', '202412', '2024',
+ 'CAGR', '4000000', '5000003', '2024-12-22', 'DR', 'PC1001', 'SEG01',
+ 'SALES', 'CUST_DEF', 'MAT001', 'S', 'EUR', 35000.00, 35000.00,
+ 'EUR', 140.000, 'PC', 'Invoice DEF Ltd - Product A'),
+
+('2024012', 'K4', '002', '0L', '5000003', '0', 'ACTUAL', '1000',
+ 'CUST_DEF', '1000', '01', '10', '2024-12-22', '2024', '202412', '2024',
+ 'CAGR', '1400000', '5000003', '2024-12-22', 'DR', 'PC1001', 'SEG01',
+ 'SALES', 'CUST_DEF', 'MAT001', 'H', 'EUR', -35000.00, -35000.00,
+ 'EUR', -140.000, 'PC', 'AR - Invoice DEF Ltd');
+
+-- December COGS entries (also duplicated to show full impact)
+INSERT INTO fi_reporting (
+    fiscper, fiscvarnt, ac_docln, acledger, ac_docnr, rectype, version, compcode,
+    pst_date, calyear, calmonth, fiscyear, chrt_acs, gl_acct, ac_docno, doc_date,
+    ac_doctp, prof_ctr, segment, funcarea, material, fidbcrin, curkey_lc,
+    cs_trn_lc, amnt_dc, doc_currcy, quantity, unit, postxt
+) VALUES
+-- COGS for Invoice 5000001 (original)
+('2024012', 'K4', '001', '0L', '5000101', '0', 'ACTUAL', '1000',
+ '2024-12-15', '2024', '202412', '2024', 'CAGR', '5000000', '5000101', '2024-12-15',
+ 'SA', 'PC1001', 'SEG01', 'COGS', 'MAT001', 'S', 'EUR',
+ 30000.00, 30000.00, 'EUR', 200.000, 'PC', 'COGS - ABC Corp order'),
+
+('2024012', 'K4', '002', '0L', '5000101', '0', 'ACTUAL', '1000',
+ '2024-12-15', '2024', '202412', '2024', 'CAGR', '1300000', '5000101', '2024-12-15',
+ 'SA', 'PC1001', 'SEG01', 'COGS', 'MAT001', 'H', 'EUR',
+ -30000.00, -30000.00, 'EUR', -200.000, 'PC', 'Inventory - ABC Corp'),
+
+-- COGS for Invoice 5000001 (DUPLICATE)
+('2024012', 'K4', '001', '0L', '5000101', '1', 'ACTUAL', '1000',
+ '2024-12-15', '2024', '202412', '2024', 'CAGR', '5000000', '5000101', '2024-12-15',
+ 'SA', 'PC1001', 'SEG01', 'COGS', 'MAT001', 'S', 'EUR',
+ 30000.00, 30000.00, 'EUR', 200.000, 'PC', 'COGS - ABC Corp order'),
+
+('2024012', 'K4', '002', '0L', '5000101', '1', 'ACTUAL', '1000',
+ '2024-12-15', '2024', '202412', '2024', 'CAGR', '1300000', '5000101', '2024-12-15',
+ 'SA', 'PC1001', 'SEG01', 'COGS', 'MAT001', 'H', 'EUR',
+ -30000.00, -30000.00, 'EUR', -200.000, 'PC', 'Inventory - ABC Corp');
+
+-- Add December consolidation data (showing the DOUBLED amounts from duplicates)
+INSERT INTO consolidation_mart (
+    pcompcd, version, fiscper, fiscvarnt, compcode, pcompany, grpacct,
+    pc_area, ppc_area, chrt_acs, gl_acct, spec, move_tp, prof_ctr, segment,
+    psegment, prodh1, prodh2, co_area, funcarea, bwtar, part_pc, bpc_src,
+    cs_ytd_qty, cs_trn_qty, unit, cs_ytd_lc, cs_trn_lc, curkey_lc
+) VALUES
+-- December Revenue - DOUBLED due to duplicate transactions
+-- Expected: 110,000 EUR (50k + 25k + 35k), Actual in FI: 220,000 EUR
+(NULL, 'ACTUAL', '2024012', 'K4', '1000', NULL, 'G4000000',
+ 'EMEA', NULL, 'CAGR', '4000000', 'REV', NULL, 'PC1001', 'SEG01',
+ NULL, 'MIXED', 'MIXED', '1000', 'SALES', NULL, NULL, 'FI',
+ 880.000, 880.000, 'PC', 670000.00, 220000.00, 'EUR'),
+
+-- December COGS - Also doubled for consistency
+(NULL, 'ACTUAL', '2024012', 'K4', '1000', NULL, 'G5000000',
+ 'EMEA', NULL, 'CAGR', '5000000', 'COGS', NULL, 'PC1001', 'SEG01',
+ NULL, 'MIXED', 'MIXED', '1000', 'COGS', NULL, NULL, 'FI',
+ 400.000, 400.000, 'PC', 135000.00, 60000.00, 'EUR');
+
+-- Add December BPC data (also shows doubled amounts propagated)
+INSERT INTO bpc_reporting (
+    version, scope, fiscper, fiscvarnt, compcode, pc_area, ppc_area, pcompcd,
+    grpacct, funcarea, spec, dsource, cs_trn_lc, cs_trn_gc
+) VALUES
+-- December actual - DOUBLED amounts from FI duplicates
+('ACTUAL', 'CONSOL', '2024012', 'K4', '1000', 'EMEA', NULL, NULL,
+ 'G4000000', 'SALES', 'REVENUE', 'FI_DATA', 220000.00, 220000.00),
+
+('ACTUAL', 'CONSOL', '2024012', 'K4', '1000', 'EMEA', NULL, NULL,
+ 'G5000000', 'COGS', 'COGS', 'FI_DATA', 60000.00, 60000.00),
+
+-- December budget (correct amounts - no duplicates in planning)
+('BUDGET', 'PLAN', '2024012', 'K4', '1000', 'EMEA', NULL, NULL,
+ 'G4000000', 'SALES', 'REVENUE', 'BPC_PLAN', 110000.00, 110000.00),
+
+('BUDGET', 'PLAN', '2024012', 'K4', '1000', 'EMEA', NULL, NULL,
+ 'G5000000', 'COGS', 'COGS', 'BPC_PLAN', 30000.00, 30000.00);
+
+-- ============================================================================
+-- DUPLICATE TRANSACTIONS SCENARIO SUMMARY:
+-- Company: 1000 (Germany/HQ)
+-- Period: 2024012 (December 2024)
+-- Issue: Delta load failure caused full reload, duplicating 2 of 3 invoices
+--
+-- Expected December Revenue: 110,000 EUR
+--   - Invoice 5000001 (ABC Corp): 50,000 EUR
+--   - Invoice 5000002 (XYZ Inc): 25,000 EUR
+--   - Invoice 5000003 (DEF Ltd): 35,000 EUR
+--
+-- Actual in Database: 220,000 EUR (doubled due to duplicates)
+--   - Invoice 5000001: 50,000 x 2 = 100,000 EUR
+--   - Invoice 5000002: 25,000 x 2 = 50,000 EUR
+--   - Invoice 5000003: 35,000 EUR (not duplicated)
+--   - Total: 185,000 EUR in duplicated invoices + 35,000 = 220,000 EUR
+--
+-- Detection method:
+--   1. Use get_fi_transactions for period 012 - notice high transaction count
+--   2. Use get_fi_summary grouped by ac_docnr - see duplicate doc numbers
+--   3. Compare actual vs budget - see 100% variance (220k vs 110k budget)
+--   4. Use compare_sources - see FI doubled vs expected
+-- ============================================================================
+
+-- ============================================================================
 -- Summary of test data:
 -- - 3 company codes: 1000 (Germany/HQ), 2000 (US), 3000 (UK)
 -- - 3 versions: ACTUAL, BUDGET, FORECAST

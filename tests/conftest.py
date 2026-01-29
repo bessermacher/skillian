@@ -9,7 +9,6 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
 from app.config import Settings
-from app.connectors import MockConnector
 from app.core import BaseSkill, SkillRegistry, Tool
 from app.db.connection import close_db, _get_engine, _get_session_factory
 
@@ -39,14 +38,6 @@ def test_settings() -> Settings:
         ollama_base_url="http://localhost:11434",
         ollama_model="llama3.2",
     )
-
-
-# Connector Fixtures
-
-@pytest.fixture
-def mock_connector() -> MockConnector:
-    """Fresh mock connector with sample data."""
-    return MockConnector()
 
 
 # Tool/Skill Fixtures

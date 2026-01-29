@@ -33,8 +33,8 @@ class SkillRegistry:
 
     Example:
         registry = SkillRegistry()
-        registry.register(FinancialSkill(connector))
-        registry.register(SalesSkill(connector))
+        registry.register(DataAnalystSkill(connector))
+        registry.register(AnotherSkill(connector))
 
         # Get all tools for LLM
         tools = registry.get_all_tools()
