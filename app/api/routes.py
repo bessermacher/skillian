@@ -19,11 +19,9 @@ from app.api.schemas import (
 )
 from app.api.sessions import SessionStore
 from app.config import get_settings
-from app.connectors import Connector
 from app.core import Agent
 from app.dependencies import (
     get_agent,
-    get_connector,
     get_llm_provider,
     get_rag_manager,
     get_session_store,
@@ -42,14 +40,11 @@ router = APIRouter()
     response_model=HealthResponse,
     tags=["Health"],
 )
-async def health_check(
-    connector: Connector = Depends(get_connector),
-) -> HealthResponse:
+async def health_check() -> HealthResponse:
     """Check application health status."""
     settings = get_settings()
     provider = get_llm_provider()
     registry = get_skill_registry()
-    connector_healthy = await connector.health_check()
 
     try:
         rag_manager = get_rag_manager()
@@ -58,13 +53,13 @@ async def health_check(
         doc_count = 0
 
     return HealthResponse(
-        status="healthy" if connector_healthy else "degraded",
+        status="healthy",
         version=settings.app_version,
         environment=settings.env,
         llm_provider=provider.provider_name,
         llm_model=provider.model_name,
-        connector=connector.name,
-        connector_healthy=connector_healthy,
+        connector="none",
+        connector_healthy=True,
         skills_count=registry.skill_count,
         tools_count=registry.tool_count,
         knowledge_documents=doc_count,

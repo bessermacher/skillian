@@ -4,16 +4,18 @@ from collections.abc import AsyncGenerator
 from functools import lru_cache
 
 from langchain_core.language_models import BaseChatModel
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.sessions import SessionStore
 from app.config import get_settings
-from app.connectors import Connector, create_business_connector, create_connector
+from app.connectors.postgres import PostgresConnector
 from app.core import Agent, SkillRegistry
+from app.core.comparison_engine import ComparisonCache, ComparisonEngine
+from app.core.query_engine import QueryEngine
+from app.core.source_registry import SourceRegistry
 from app.db.connection import get_db_session
 from app.llm import LLMProvider, create_llm_provider
 from app.rag import RAGManager, VectorStore, create_embeddings
-from app.skills import BusinessSkill, FinancialSkill
+from app.skills.data_analyst import DataAnalystSkill
 
 
 @lru_cache
@@ -30,25 +32,63 @@ def get_chat_model() -> BaseChatModel:
 
 
 @lru_cache
-def get_connector() -> Connector:
-    """Get cached data connector instance."""
+def get_source_registry() -> SourceRegistry:
+    """Get cached source registry."""
+    return SourceRegistry("config/sources.yaml")
+
+
+@lru_cache
+def get_business_connector() -> PostgresConnector:
+    """Get cached PostgreSQL connector for business data."""
     settings = get_settings()
-    return create_connector(settings)
+    return PostgresConnector(settings.business_database_url)
+
+
+@lru_cache
+def get_query_engine() -> QueryEngine:
+    """Get cached query engine."""
+    connector = get_business_connector()
+    return QueryEngine(connector)
+
+
+@lru_cache
+def get_comparison_cache() -> ComparisonCache:
+    """Get cached comparison cache."""
+    registry = get_source_registry()
+    ttl = (
+        registry.comparison_config.cache_ttl_seconds
+        if registry.comparison_config
+        else 3600
+    )
+    return ComparisonCache(ttl_seconds=ttl)
+
+
+@lru_cache
+def get_comparison_engine() -> ComparisonEngine:
+    """Get cached comparison engine."""
+    registry = get_source_registry()
+    query_engine = get_query_engine()
+    cache = get_comparison_cache()
+    return ComparisonEngine(registry, query_engine, cache)
+
+
+@lru_cache
+def get_data_analyst_skill() -> DataAnalystSkill:
+    """Get cached data analyst skill."""
+    registry = get_source_registry()
+    query_engine = get_query_engine()
+    comparison_engine = get_comparison_engine()
+    return DataAnalystSkill(registry, query_engine, comparison_engine)
 
 
 @lru_cache
 def get_skill_registry() -> SkillRegistry:
     """Get cached skill registry with all skills registered."""
     registry = SkillRegistry()
-    settings = get_settings()
 
-    # Financial skill uses mock connector (for development)
-    mock_connector = create_connector(settings)
-    registry.register(FinancialSkill(mock_connector))
-
-    # Business skill uses PostgreSQL connector
-    business_connector = create_business_connector(settings)
-    registry.register(BusinessSkill(business_connector))
+    # Register data analyst skill
+    skill = get_data_analyst_skill()
+    registry.register(skill)
 
     return registry
 
@@ -80,7 +120,7 @@ def get_agent() -> Agent:
     return Agent(chat_model, registry)
 
 
-async def get_session_store() -> AsyncGenerator[SessionStore, None]:
+async def get_session_store() -> AsyncGenerator[SessionStore]:
     """Get session store with database session."""
     async for db_session in get_db_session():
         yield SessionStore(db_session, get_agent)

@@ -15,26 +15,26 @@ class Skill(Protocol):
     - System Prompt: Domain-specific instructions
 
     Example:
-        class FinancialSkill:
+        class DataAnalystSkill:
             @property
             def name(self) -> str:
-                return "financial"
+                return "data_analyst"
 
             @property
             def description(self) -> str:
-                return "Analyze financial data in SAP BW"
+                return "Compare and analyze data from multiple sources"
 
             @property
             def tools(self) -> list[Tool]:
-                return [self.analyze_cost_center, ...]
+                return [self.query_source, self.compare_datasets, ...]
 
             @property
             def system_prompt(self) -> str:
-                return "You are a financial analyst..."
+                return "You are a data analyst..."
 
             @property
             def knowledge_paths(self) -> list[str]:
-                return ["app/skills/financial/knowledge/"]
+                return ["app/skills/data_analyst/knowledge/"]
     """
 
     @property

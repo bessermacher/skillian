@@ -1,4 +1,8 @@
-"""Message types for agent conversations."""
+"""Message types for agent conversations.
+
+This module provides a thin wrapper around LangChain message types,
+designed for eventual migration to LangGraph's state management.
+"""
 
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -42,7 +46,11 @@ class Message:
 
 @dataclass
 class Conversation:
-    """A conversation with message history."""
+    """A conversation with message history.
+
+    Note: This will be replaced by LangGraph state management
+    in a future iteration.
+    """
 
     messages: list[Message] = field(default_factory=list)
 

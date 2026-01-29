@@ -26,6 +26,7 @@ TEST_DATABASE_URL = os.getenv(
 )
 
 
+@pytest.mark.integration
 class TestVectorStore:
     @pytest.fixture
     def temp_dir(self, tmp_path):
