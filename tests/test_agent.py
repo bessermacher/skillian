@@ -1,7 +1,8 @@
 """Tests for Agent."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 from pydantic import BaseModel
 
 from app.core import Agent, BaseSkill, SkillRegistry, Tool
@@ -61,7 +62,7 @@ class TestAgent:
         mock_model.bind_tools.assert_not_called()
 
     def test_agent_binds_tools(self, mock_model, registry):
-        agent = Agent(mock_model, registry)
+        _agent = Agent(mock_model, registry)  # noqa: F841
         mock_model.bind_tools.assert_called_once()
 
     def test_agent_has_system_prompt(self, mock_model, registry):

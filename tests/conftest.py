@@ -10,7 +10,6 @@ from pydantic import BaseModel
 
 from app.config import Settings
 from app.core import BaseSkill, SkillRegistry, Tool
-from app.db.connection import close_db, _get_engine, _get_session_factory
 
 
 @pytest.fixture(autouse=True)
@@ -160,7 +159,7 @@ def mock_chat_model_with_tool_call() -> MagicMock:
 # API Fixtures
 
 @pytest.fixture
-def client() -> Generator[TestClient, None, None]:
+def client() -> Generator[TestClient]:
     """FastAPI test client."""
     from main import app
     with TestClient(app) as client:
@@ -170,7 +169,7 @@ def client() -> Generator[TestClient, None, None]:
 # Temp Directory Fixtures
 
 @pytest.fixture
-def temp_dir() -> Generator[str, None, None]:
+def temp_dir() -> Generator[str]:
     """Temporary directory for tests."""
     with tempfile.TemporaryDirectory() as tmpdir:
         yield tmpdir

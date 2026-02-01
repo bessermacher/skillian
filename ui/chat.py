@@ -17,6 +17,8 @@ st.set_page_config(
 # Initialize session state
 if "messages" not in st.session_state:
     st.session_state.messages = []
+if "session_id" not in st.session_state:
+    st.session_state.session_id = None
 
 # Sidebar
 with st.sidebar:
@@ -31,7 +33,12 @@ with st.sidebar:
 
     if st.button("New Chat", use_container_width=True):
         st.session_state.messages = []
+        st.session_state.session_id = None
         st.rerun()
+
+    # Show current session
+    if st.session_state.session_id:
+        st.caption(f"Session: {st.session_state.session_id[:8]}...")
 
     st.divider()
 
@@ -73,9 +80,13 @@ if prompt := st.chat_input("Ask about SAP BW data issues..."):
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
             try:
+                payload = {"message": prompt}
+                if st.session_state.session_id:
+                    payload["session_id"] = st.session_state.session_id
+
                 response = requests.post(
                     f"{backend_url}/api/v1/chat",
-                    json={"message": prompt},
+                    json=payload,
                     timeout=120,
                 )
 
@@ -83,6 +94,10 @@ if prompt := st.chat_input("Ask about SAP BW data issues..."):
                     data = response.json()
                     assistant_message = data.get("response", "No response")
                     tool_calls = data.get("tool_calls", [])
+
+                    # Store session_id for conversation continuity
+                    if data.get("session_id"):
+                        st.session_state.session_id = data["session_id"]
 
                     st.markdown(assistant_message)
 

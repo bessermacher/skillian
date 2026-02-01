@@ -2,7 +2,6 @@
 
 from abc import ABC, abstractmethod
 
-from app.core.skill import Skill
 from app.core.tool import Tool
 
 

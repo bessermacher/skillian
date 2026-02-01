@@ -2,7 +2,6 @@
 
 from pydantic import BaseModel, Field
 
-
 # Health & Info
 
 class HealthResponse(BaseModel):
@@ -13,11 +12,10 @@ class HealthResponse(BaseModel):
     environment: str
     llm_provider: str
     llm_model: str
-    connector: str
-    connector_healthy: bool
     skills_count: int
     tools_count: int
     knowledge_documents: int
+    business_db_healthy: bool
 
 
 class SkillInfo(BaseModel):

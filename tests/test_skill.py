@@ -1,7 +1,8 @@
 """Tests for Skill protocol and BaseSkill."""
 
-from app.core import BaseSkill, Skill, Tool
 from pydantic import BaseModel
+
+from app.core import BaseSkill, Skill, Tool
 
 
 class DummyInput(BaseModel):

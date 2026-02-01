@@ -48,10 +48,14 @@ This document provides a comprehensive analysis of the Skillian codebase and ser
 
 ### Key Weaknesses
 
-- Security configuration not production-ready
+- Security configuration not production-ready (CORS)
 - No proper logging infrastructure
-- Resource cleanup gaps
-- Scalability limitations (in-memory cache)
+- Resource cleanup gaps on shutdown
+- Architectural decisions needed (stateless vs sessions)
+
+### Important Context
+
+> **This is an internal MVP tool.** Many "best practice" suggestions would be over-engineering at this stage. The roadmap below distinguishes between actual bugs vs. nice-to-haves.
 
 ---
 
@@ -189,6 +193,71 @@ except Exception as e:
 - Python 3.13+
 ```
 
+### 3. Stateless Chat Architecture (DESIGN DECISION NEEDED)
+
+**Location:** `app/api/routes.py:102-126`, `ui/chat.py:76-77`
+
+**Current behavior:**
+- `/chat` endpoint creates a **new Agent per request**
+- Streamlit UI calls `/chat`, not `/sessions`
+- Result: No conversation memory between messages on server side
+
+```python
+# routes.py - new agent every request
+@router.post("/chat")
+async def chat(
+    request: ChatRequest,
+    agent: Agent = Depends(get_agent),  # Creates new agent!
+):
+```
+
+**Questions to answer:**
+1. Is stateless `/chat` intentional for simplicity?
+2. Should Streamlit use the sessions API instead?
+3. Is the sessions feature needed at all for MVP?
+
+### 4. Duplicate Router Mounting (BUG OR INTENTIONAL?)
+
+**Location:** `main.py:68-71`
+
+```python
+# Routes available at BOTH /api/v1/health AND /health
+app.include_router(router, prefix="/api/v1")
+app.include_router(router)  # Also at root - why?
+```
+
+**Recommendation:** Remove duplicate if unintentional, or document if intentional.
+
+### 5. Incomplete Health Check
+
+**Location:** `app/api/routes.py:43-66`
+
+**Problem:** Health endpoint checks vector store but not business database.
+
+**Fix:** Add business database health check to the endpoint.
+
+### 6. No Fail-Fast Configuration (HIGH)
+
+**Location:** `app/config.py`
+
+**Problem:** App starts successfully even with missing required API keys. Fails later at runtime when LLM is called.
+
+**Fix:**
+```python
+from pydantic import model_validator
+
+class Settings(BaseSettings):
+    # ...existing fields...
+
+    @model_validator(mode='after')
+    def validate_provider_config(self) -> 'Settings':
+        if self.llm_provider == 'anthropic' and not self.anthropic_api_key:
+            raise ValueError('ANTHROPIC_API_KEY required when LLM_PROVIDER=anthropic')
+        if self.llm_provider == 'openai' and not self.openai_api_key:
+            raise ValueError('OPENAI_API_KEY required when LLM_PROVIDER=openai')
+        return self
+```
+
 ---
 
 ## Architecture Analysis
@@ -235,10 +304,12 @@ def get_skill_registry() -> SkillRegistry:
 - Cannot easily swap implementations
 - Memory not released until process ends
 
-**Fix Options:**
-1. Use FastAPI's `Depends()` with request-scoped lifetimes
-2. Implement a proper DI container (e.g., `dependency-injector`)
-3. Add cache clearing utility for tests
+**Assessment:** This is **not a problem worth fixing** for an MVP.
+- The `lru_cache` approach is simple and works
+- Tests can clear cache with `get_skill_registry.cache_clear()`
+- A full DI container would add complexity without clear benefit
+
+**If it becomes a problem later:** Add cache clearing in test fixtures.
 
 #### 3.2 Resource Cleanup Missing
 
@@ -279,7 +350,7 @@ async def lifespan(app: FastAPI):
 
 **Location:** `app/core/comparison_engine.py:59-93`
 
-**Problem:** `ComparisonCache` uses in-memory dict, won't work with multiple instances.
+**Observation:** `ComparisonCache` uses in-memory dict, won't work with multiple instances.
 
 ```python
 class ComparisonCache:
@@ -287,22 +358,12 @@ class ComparisonCache:
         self._cache: dict[str, ComparisonResult] = {}  # In-memory only
 ```
 
-**Fix:** Abstract cache interface, implement Redis backend:
-```python
-from abc import ABC, abstractmethod
+**Assessment:** This is **fine for MVP**.
+- Internal tool likely runs single instance
+- Adding Redis adds operational complexity
+- Only abstract when you actually need multiple backends (YAGNI)
 
-class CacheBackend(ABC):
-    @abstractmethod
-    async def get(self, key: str) -> ComparisonResult | None: ...
-
-    @abstractmethod
-    async def set(self, key: str, value: ComparisonResult, ttl: int) -> None: ...
-
-class RedisCache(CacheBackend):
-    def __init__(self, redis_url: str):
-        self._redis = aioredis.from_url(redis_url)
-    # ... implementation
-```
+**When to revisit:** If/when deploying multiple API instances behind load balancer.
 
 #### 3.4 Inefficient Session Listing
 
@@ -358,35 +419,36 @@ print(f"Starting {settings.app_name} v{settings.app_version}")
 print(f"Warning: RAG initialization failed: {e}")
 ```
 
-**Fix:** Implement structured logging:
+**Fix:** Use stdlib `logging` (simpler than structlog for MVP):
 
 ```python
 # app/logging.py
 import logging
-import structlog
+import sys
 
 def setup_logging(debug: bool = False):
     level = logging.DEBUG if debug else logging.INFO
 
-    structlog.configure(
-        processors=[
-            structlog.stdlib.filter_by_level,
-            structlog.stdlib.add_logger_name,
-            structlog.stdlib.add_log_level,
-            structlog.processors.TimeStamper(fmt="iso"),
-            structlog.processors.JSONRenderer(),
-        ],
-        wrapper_class=structlog.stdlib.BoundLogger,
-        context_class=dict,
-        logger_factory=structlog.stdlib.LoggerFactory(),
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+        stream=sys.stdout,
     )
 
-    logging.basicConfig(level=level)
+# main.py
+from app.logging import setup_logging
 
-# Usage
-logger = structlog.get_logger(__name__)
-logger.info("starting_app", name=settings.app_name, version=settings.app_version)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    settings = get_settings()
+    setup_logging(settings.debug)
+
+    logger = logging.getLogger(__name__)
+    logger.info("Starting %s v%s", settings.app_name, settings.app_version)
+    # ...
 ```
+
+**Note:** Don't use `structlog` - it adds a dependency and learning curve without significant benefit for an MVP.
 
 ### 4.2 Type Hint Issues
 
@@ -598,90 +660,331 @@ addopts = "-v --tb=short -m 'not integration'"
 | Pydantic validation | Input schemas, Settings |
 | Async/await | Throughout codebase |
 
-### What Needs Improvement
+### What Needs Improvement (MVP Scope)
 
-| Area | Current | Recommended |
-|------|---------|-------------|
-| Logging | `print()` | `structlog` or `logging` |
-| Config validation | Basic | Add `@field_validator` for conditional requirements |
-| Database migrations | None | Alembic |
-| API versioning | `/api/v1` prefix | Proper versioning strategy |
-| Error responses | Generic | Structured error schema |
-| Health checks | Partial | Include all dependencies |
+| Area | Current | Recommended | Status |
+|------|---------|-------------|--------|
+| Logging | `print()` | stdlib `logging` | ✅ Done |
+| Config validation | Basic | Add `@model_validator` for provider keys | ✅ Done |
+| Health checks | Partial | Include business DB | ✅ Done |
+| Error responses | Generic | Log + sanitize | ✅ Done |
+| API versioning | Dual mount | Remove duplicate | ✅ Done |
 
-### Recommended Config Validation
+### What to Defer (Not Needed for MVP)
 
-```python
-from pydantic import field_validator
-
-class Settings(BaseSettings):
-    # ... existing fields ...
-
-    @field_validator('anthropic_api_key')
-    @classmethod
-    def validate_anthropic_key(cls, v, info):
-        if info.data.get('llm_provider') == 'anthropic' and not v:
-            raise ValueError('ANTHROPIC_API_KEY required when using Anthropic provider')
-        return v
-```
+| Area | Why Defer |
+|------|-----------|
+| Database migrations (Alembic) | Schema is simple, only one table |
+| Structured error schema | Basic error handling is sufficient |
+| Redis caching | Single instance is fine |
+| OpenTelemetry | Logging is enough for now |
 
 ---
 
 ## Refactoring Roadmap
 
-### Phase 1: Critical Security (Priority: Immediate)
+> **Philosophy:** This is an internal MVP tool. Avoid over-engineering. Add complexity only when actually needed.
 
-| Task | File | Effort |
+### Critical Re-evaluation Notes
+
+#### What Was Over-Engineered in Initial Review
+
+| Suggestion | Why It's Over-Engineering | Better Approach |
+|------------|---------------------------|-----------------|
+| Redis cache | Adds ops complexity; internal tool has few users | Keep in-memory; add Redis only when scaling horizontally |
+| Rate limiting | Internal tool behind corp network doesn't need it | Defer; use nginx/traefik if ever needed |
+| Kubernetes | Docker Compose works fine | Don't do yet |
+| OpenTelemetry | Too complex for MVP | Simple logging is enough |
+| structlog | Extra dependency, learning curve | Use stdlib `logging` |
+| Full DI refactor | `lru_cache` works; tests can clear cache | Keep current approach |
+| Pagination | Few sessions in MVP | Defer until needed |
+| Alembic | Schema is simple (one table) | Defer until schema evolves |
+
+#### What Was Missed in Initial Review
+
+| Issue | Location | Status |
+|-------|----------|--------|
+| `/chat` is stateless | `routes.py:102` | ⏳ Design decision needed |
+| Duplicate router mounting | `main.py:68-71` | ✅ Fixed (removed root mount) |
+| Business DB not health-checked | `routes.py:43-66` | ✅ Fixed |
+| Session GET recreates Agent | `sessions.py:126` | ⏳ Design decision needed |
+| No fail-fast on bad config | `config.py` | ✅ Fixed |
+| Streamlit ignores sessions | `ui/chat.py:76` | ⏳ Design decision needed |
+
+---
+
+### Revised Roadmap
+
+### Tier 1: Must Fix (Actual Bugs) ✅ COMPLETED
+
+| Task | File | Status |
 |------|------|--------|
-| Fix CORS configuration | `main.py` | 30 min |
-| Add rate limiting | `main.py`, new middleware | 2 hours |
-| Sanitize error responses | `app/api/routes.py` | 1 hour |
-| Add request validation | API routes | 2 hours |
+| Fix VectorStore.count() engine leak | `app/rag/store.py` | ✅ Done |
+| Add resource cleanup on shutdown | `main.py` lifespan | ✅ Done |
+| Add config validation (fail-fast) | `app/config.py` | ✅ Done |
+| Add business DB health check | `app/api/routes.py` | ✅ Done |
+| Connection pool limits | `app/connectors/postgres.py` | ✅ Done |
 
-### Phase 2: Infrastructure (Priority: High)
+### Tier 2: Should Fix (Good Hygiene) ✅ COMPLETED
 
-| Task | File | Effort |
+| Task | File | Status |
 |------|------|--------|
-| Implement logging | New `app/logging.py`, all modules | 4 hours |
-| Add resource cleanup | `main.py` lifespan | 1 hour |
-| Fix connection pool config | `app/connectors/postgres.py` | 30 min |
-| Fix VectorStore engine reuse | `app/rag/store.py` | 1 hour |
+| Replace print() with logging | `main.py` | ✅ Done |
+| Fix CORS for production | `main.py` | ✅ Done |
+| Remove duplicate router mount | `main.py` | ✅ Done (kept `/api/v1` only) |
+| Fix type hint `callable` → `Callable` | `app/api/sessions.py` | ✅ Done |
+| Improve error handling | `app/api/routes.py` | ✅ Done |
+| Update Python version in docs | `CLAUDE.md` | ✅ Done |
 
-### Phase 3: Performance (Priority: Medium)
+### Tier 3: Design Decisions Needed
 
-| Task | File | Effort |
-|------|------|--------|
-| Add pagination to list endpoints | `app/api/routes.py`, schemas | 2 hours |
-| Optimize session listing | `app/api/sessions.py` | 1 hour |
-| Abstract cache backend | `app/core/comparison_engine.py` | 4 hours |
-| Add database indexes | New migration | 1 hour |
+These require product decisions, not just code fixes.
 
-### Phase 4: Code Quality (Priority: Medium)
+---
 
-| Task | File | Effort |
-|------|------|--------|
-| Fix type hints | `app/api/sessions.py`, others | 1 hour |
-| Add missing docstrings | Various | 2 hours |
-| Improve exception handling | Various | 3 hours |
-| Update Python version in docs | `CLAUDE.md` | 10 min |
+## Tier 3 Deep Dive: Architecture Decisions
 
-### Phase 5: Testing (Priority: Medium)
+### Decision 1: Stateless `/chat` vs Session-Based Conversations
 
-| Task | File | Effort |
-|------|------|--------|
-| Fix mock embeddings | `tests/conftest.py` | 1 hour |
-| Add error path tests | New test files | 4 hours |
-| Add security tests | New test file | 4 hours |
-| Set up integration test CI | CI config | 2 hours |
+#### Current State
+```
+User → POST /chat → New Agent created → Response → Agent discarded
+```
 
-### Phase 6: Production Readiness (Priority: Lower)
+Each `/chat` request:
+1. Creates a new `Agent` instance
+2. Sets up system prompt from scratch
+3. Has no memory of previous messages
+4. Discards all context after responding
 
-| Task | File | Effort |
-|------|------|--------|
-| Add Alembic migrations | New `alembic/` directory | 4 hours |
-| Implement Redis cache | New module | 4 hours |
-| Add OpenTelemetry tracing | New middleware | 4 hours |
-| Create Kubernetes manifests | New `k8s/` directory | 8 hours |
+#### The Problem
+
+The Streamlit UI stores conversation history client-side, but:
+- Server has no memory between requests
+- Each message is processed independently
+- Multi-turn tool usage doesn't work properly
+- LLM loses context for follow-up questions
+
+**Example failure:**
+```
+User: "Compare FI and BPC for company 1000"
+Assistant: [uses compare_sources tool, returns results]
+User: "Show me the top differences"
+Assistant: [has no idea what was compared - starts fresh]
+```
+
+#### Options
+
+**Option A: Keep Stateless (Current)**
+
+| Pros | Cons |
+|------|------|
+| Simple, no state management | No multi-turn conversations |
+| Scales horizontally easily | Each request is isolated |
+| No session cleanup needed | Can't do follow-up queries |
+| Lower memory usage | Poor UX for complex analysis |
+
+**Best for:** Simple single-question queries, stateless API consumers
+
+**Option B: Auto-Create Session for `/chat`**
+
+Change `/chat` to automatically create/use sessions:
+
+```python
+@router.post("/chat")
+async def chat(request: ChatRequest):
+    session_id = request.session_id or create_new_session()
+    session = get_or_create_session(session_id)
+    result = await session.agent.process(request.message)
+    return ChatResponse(..., session_id=session_id)
+```
+
+| Pros | Cons |
+|------|------|
+| Transparent to clients | More complex server logic |
+| Multi-turn works | Need session cleanup strategy |
+| Better UX | Higher memory usage |
+| Compatible with existing clients | Session management overhead |
+
+**Best for:** Interactive conversations, data analysis workflows
+
+**Option C: Require Sessions (Remove stateless `/chat`)**
+
+Only allow session-based conversations:
+
+| Pros | Cons |
+|------|------|
+| Consistent behavior | Breaking change for clients |
+| Clear API contract | Forced complexity for simple queries |
+| Proper conversation model | Extra round-trip to create session |
+
+#### Recommendation
+
+**For an SAP data diagnostic tool: Option B (auto-session)** is likely best because:
+- Users often ask follow-up questions ("now show me company 2000")
+- Tool results need context ("explain that difference")
+- Analysis is iterative, not single-shot
+
+---
+
+### Decision 2: Streamlit Session Integration
+
+#### Current State
+
+```
+[Streamlit UI]
+    ↓
+st.session_state.messages (client-side)
+    ↓
+POST /api/v1/chat (no session_id)
+    ↓
+[Server: New Agent, no history]
+```
+
+The UI maintains its own message history but doesn't use server sessions.
+
+#### Options
+
+**Option A: Keep Client-Side Only**
+
+| Pros | Cons |
+|------|------|
+| Simple, works now | History lost on refresh |
+| No server dependency | Can't resume on another device |
+| Fast (no DB calls) | Inconsistent with sessions API |
+
+**Option B: Integrate with Sessions API**
+
+```python
+# ui/chat.py changes
+if "session_id" not in st.session_state:
+    response = requests.post(f"{backend_url}/api/v1/sessions", ...)
+    st.session_state.session_id = response.json()["session_id"]
+else:
+    response = requests.post(
+        f"{backend_url}/api/v1/sessions/{st.session_state.session_id}/chat",
+        ...
+    )
+```
+
+| Pros | Cons |
+|------|------|
+| Persistent history | More complex UI code |
+| Resume on refresh | DB dependency |
+| Server-side context | Latency for session lookups |
+| Multi-device support | Session cleanup needed |
+
+#### Recommendation
+
+**Depends on Decision 1:**
+- If you choose Option B (auto-session) for `/chat`, Streamlit integration becomes simpler
+- If stateless, client-side only makes sense
+
+---
+
+### Decision 3: Is the Sessions Feature Needed?
+
+#### Current Usage
+- Sessions API exists (`/sessions`, `/sessions/{id}/chat`)
+- Streamlit UI doesn't use it
+- `/chat` endpoint is stateless
+
+#### Options
+
+**Option A: Remove Sessions (Simplify)**
+
+Delete:
+- `app/api/sessions.py`
+- Session routes in `routes.py`
+- `SessionModel` in database
+
+| Pros | Cons |
+|------|------|
+| Less code to maintain | Lose multi-turn capability |
+| Simpler architecture | Can't add it back easily |
+| Smaller attack surface | Limits future UX |
+
+**Option B: Keep and Use Sessions**
+
+Integrate sessions into the main flow.
+
+| Pros | Cons |
+|------|------|
+| Multi-turn works | More complexity |
+| Feature already built | Need to finish integration |
+| Better UX potential | Session management overhead |
+
+**Option C: Keep but Defer**
+
+Leave sessions code, don't integrate yet.
+
+| Pros | Cons |
+|------|------|
+| Option preserved | Dead code in codebase |
+| No immediate work | Confusing architecture |
+| Defer decision | Technical debt |
+
+#### Recommendation
+
+**For MVP: Option A or C**
+- If you need multi-turn now: Option B
+- If single-query works: Option A (remove)
+- If unsure: Option C (defer, but add TODO)
+
+---
+
+### Decision Summary Table
+
+| Decision | Recommended | Effort | Status |
+|----------|-------------|--------|--------|
+| 1. Stateless vs Sessions | **B: Auto-session** | Medium | ✅ Done |
+| 2. Streamlit integration | Follows from #1 | Low | ✅ Done |
+| 3. Keep sessions feature? | **B: Keep and use** | Already built | ✅ Done (in use) |
+
+### ✅ Implemented: "Make it Conversational"
+
+Implementation completed:
+1. ✅ Modified `/chat` to auto-create sessions (accepts optional `session_id`)
+2. ✅ Updated Streamlit UI to store and use `session_id` from responses
+3. ⏸️ Session TTL/cleanup - deferred (manual cleanup if needed)
+4. ⏸️ Optimize Agent recreation - deferred until performance issues arise
+
+### If You Choose: "Keep it Simple"
+
+Implementation steps:
+1. Remove sessions code entirely
+2. Update docs to clarify single-turn nature
+3. Ensure Streamlit client-side history works well
+4. Accept limitation for MVP
+
+---
+
+| Question | Current State | Options |
+|----------|---------------|---------|
+| Should `/chat` have memory? | Stateless, new Agent per request | A) Keep stateless (simpler) B) Auto-create session |
+| Should Streamlit use sessions? | Doesn't use server sessions | A) Keep client-side only B) Integrate with sessions API |
+| Is session feature needed for MVP? | Built but unused by UI | A) Remove sessions feature B) Use it in UI |
+| Optimize session Agent creation? | Creates new Agent on every GET | Only optimize if sessions are kept |
+
+### Tier 4: Defer Until Needed (YAGNI)
+
+| Task | When to Revisit |
+|------|-----------------|
+| Pagination | When you have >100 sessions |
+| Redis cache | When running multiple instances |
+| Rate limiting | When exposed to internet |
+| Alembic migrations | When schema needs changes |
+| Abstract cache backend | When actually need Redis |
+| Advanced testing (security, perf) | Before production launch |
+
+### Tier 5: Don't Do
+
+| Task | Reason |
+|------|--------|
+| Kubernetes manifests | Docker Compose is sufficient |
+| OpenTelemetry | Over-engineering for MVP |
+| Full DI container | Current approach works |
+| structlog | stdlib logging is sufficient |
 
 ---
 

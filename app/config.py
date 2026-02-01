@@ -1,8 +1,9 @@
 """Application configuration using pydantic-settings."""
 
 from functools import lru_cache
-from typing import Literal
+from typing import Literal, Self
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -56,6 +57,19 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.env == "production"
+
+    @model_validator(mode="after")
+    def validate_provider_config(self) -> Self:
+        """Validate that required API keys are present for the selected provider."""
+        if self.llm_provider == "anthropic" and not self.anthropic_api_key:
+            raise ValueError(
+                "ANTHROPIC_API_KEY is required when LLM_PROVIDER=anthropic"
+            )
+        if self.llm_provider == "openai" and not self.openai_api_key:
+            raise ValueError(
+                "OPENAI_API_KEY is required when LLM_PROVIDER=openai"
+            )
+        return self
 
 
 @lru_cache

@@ -6,7 +6,6 @@ from langchain_core.embeddings import Embeddings
 
 from app.config import Settings
 
-
 EmbeddingsType = Literal["ollama", "openai"]
 
 

@@ -4,8 +4,8 @@ import pytest
 
 from app.config import Settings
 from app.llm import LLMFactoryError, create_llm_provider
-from app.llm.ollama import OllamaProvider
 from app.llm.anthropic import AnthropicProvider
+from app.llm.ollama import OllamaProvider
 
 
 class TestLLMFactory:
@@ -27,10 +27,9 @@ class TestLLMFactory:
         assert provider.provider_name == "anthropic"
 
     def test_anthropic_requires_api_key(self):
-        settings = Settings(llm_provider="anthropic", anthropic_api_key=None)
-
-        with pytest.raises(LLMFactoryError):
-            create_llm_provider(settings)
+        # Validation now happens at Settings level, not factory
+        with pytest.raises(ValueError, match="ANTHROPIC_API_KEY is required"):
+            Settings(llm_provider="anthropic", anthropic_api_key=None)
 
     def test_unknown_provider_raises(self):
         settings = Settings()

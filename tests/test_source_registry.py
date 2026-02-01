@@ -1,16 +1,10 @@
 """Tests for source registry."""
 
-import tempfile
-from pathlib import Path
 
 import pytest
 import yaml
 
 from app.core.source_registry import (
-    ComparisonConfig,
-    DimensionDef,
-    MeasureDef,
-    SourceDef,
     SourceNotFoundError,
     SourceRegistry,
 )

@@ -40,6 +40,7 @@ class VectorStore:
     chunk_overlap: int = 200
     _store: PGVector | None = field(default=None, init=False)
     _splitter: RecursiveCharacterTextSplitter | None = field(default=None, init=False)
+    _sync_connection: str = field(default="", init=False)
 
     def __post_init__(self):
         """Initialize the vector store and text splitter."""
@@ -51,7 +52,7 @@ class VectorStore:
 
         # Convert asyncpg URL to psycopg for langchain-postgres
         # langchain-postgres requires psycopg (sync) driver
-        connection = self.connection_string.replace(
+        self._sync_connection = self.connection_string.replace(
             "postgresql+asyncpg://", "postgresql+psycopg://"
         )
 
@@ -59,7 +60,7 @@ class VectorStore:
         self._store = PGVector(
             collection_name=self.collection_name,
             embeddings=self.embeddings,
-            connection=connection,
+            connection=self._sync_connection,
             use_jsonb=True,
         )
 
@@ -174,13 +175,10 @@ class VectorStore:
         """Clear all documents from the store."""
         self._store.delete_collection()
         # Recreate the collection
-        connection = self.connection_string.replace(
-            "postgresql+asyncpg://", "postgresql+psycopg://"
-        )
         self._store = PGVector(
             collection_name=self.collection_name,
             embeddings=self.embeddings,
-            connection=connection,
+            connection=self._sync_connection,
             use_jsonb=True,
         )
 
@@ -188,15 +186,11 @@ class VectorStore:
     def count(self) -> int:
         """Number of documents in the store."""
         try:
-            # Query the langchain_pg_embedding table for document count
-            from sqlalchemy import create_engine, text
+            # Use PGVector's internal engine to avoid creating new connections
+            from sqlalchemy import text
 
-            connection = self.connection_string.replace(
-                "postgresql+asyncpg://", "postgresql+psycopg://"
-            )
-            engine = create_engine(connection)
-            with engine.connect() as conn:
-                result = conn.execute(
+            with self._store._make_sync_session() as session:
+                result = session.execute(
                     text(
                         "SELECT COUNT(*) FROM langchain_pg_embedding "
                         "WHERE collection_id = ("
