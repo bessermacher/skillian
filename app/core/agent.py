@@ -71,7 +71,8 @@ class Agent:
 
     def _setup_system_prompt(self) -> None:
         """Set up the system prompt with skill context."""
-        base_prompt = """You are Skillian, an AI assistant specialized in diagnosing SAP BW data issues.
+        base_prompt = """You are Skillian, an AI assistant specialized in \
+diagnosing SAP BW data issues.
 
 You have access to tools that can query SAP BW data. Use these tools to help users:
 - Analyze financial data (cost centers, profit centers, budgets)
@@ -199,7 +200,7 @@ Be concise and accurate in your responses.
 
         # Max iterations reached
         return AgentResponse(
-            content="I apologize, but I couldn't complete the request within the allowed iterations.",
+            content="I couldn't complete the request within the allowed iterations.",
             tool_calls_made=tool_calls_made,
             finished=False,
         )

@@ -1,7 +1,8 @@
 """Integration tests for the complete application flow."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 
 class TestFullChatFlow:

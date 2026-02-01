@@ -1,6 +1,7 @@
 """Session management for conversations with PostgreSQL persistence."""
 
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -65,7 +66,7 @@ class Session:
 class SessionStore:
     """PostgreSQL-backed session store."""
 
-    def __init__(self, db: AsyncSession, agent_factory: callable):
+    def __init__(self, db: AsyncSession, agent_factory: Callable[[], Agent]):
         """Initialize the session store.
 
         Args:

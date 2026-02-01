@@ -20,7 +20,13 @@ class PostgresConnector:
     async def get_pool(self) -> asyncpg.Pool:
         """Get or create connection pool."""
         if self._pool is None:
-            self._pool = await asyncpg.create_pool(self._url)
+            self._pool = await asyncpg.create_pool(
+                self._url,
+                min_size=2,
+                max_size=10,
+                max_inactive_connection_lifetime=300,
+                command_timeout=60,
+            )
         return self._pool
 
     async def execute(self, query: str, params: list[Any] | None = None) -> list[dict]:
