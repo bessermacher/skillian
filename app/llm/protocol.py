@@ -20,5 +20,5 @@ class LLMProvider(Protocol):
 
     @property
     def provider_name(self) -> str:
-        """Return the provider name (ollama, anthropic, openai)."""
+        """Return the provider name (ollama, anthropic, openai, custom_openai)."""
         ...
