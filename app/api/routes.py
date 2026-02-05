@@ -21,9 +21,7 @@ from app.api.schemas import (
 )
 from app.api.sessions import SessionStore
 from app.config import get_settings
-from app.core import Agent
 from app.dependencies import (
-    get_agent,
     get_business_connector,
     get_llm_provider,
     get_rag_manager,

@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     api_port: int = 8000
 
     # LLM Provider
-    llm_provider: Literal["ollama", "anthropic", "openai"] = "ollama"
+    llm_provider: Literal["ollama", "anthropic", "openai", "custom_openai"] = "ollama"
 
     # Ollama
     ollama_base_url: str = "http://localhost:11434"
@@ -41,6 +41,13 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o"
 
+    # Custom OpenAI-compatible provider
+    custom_openai_api_key: str | None = None
+    custom_openai_base_url: str = "https://your-api-endpoint.com/v1"
+    custom_openai_model: str = "your-model"
+    custom_openai_timeout: int = 60
+    custom_openai_max_retries: int = 3
+
     # Vector Store (uses database_url for pgvector)
     vector_collection_name: str = "skillian_knowledge"
 
@@ -49,6 +56,16 @@ class Settings(BaseSettings):
 
     # Business Database (SAP BW data)
     business_database_url: str = "postgresql://business:business@localhost:5433/business_db"
+
+    # SAP Datasphere
+    datasphere_host: str | None = None
+    datasphere_port: int = 443
+    datasphere_space: str | None = None
+    datasphere_client_id: str | None = None
+    datasphere_client_secret: str | None = None
+    datasphere_token_url: str | None = None
+    datasphere_timeout: int = 60
+    datasphere_max_connections: int = 10
 
     @property
     def is_development(self) -> bool:
@@ -68,6 +85,24 @@ class Settings(BaseSettings):
         if self.llm_provider == "openai" and not self.openai_api_key:
             raise ValueError(
                 "OPENAI_API_KEY is required when LLM_PROVIDER=openai"
+            )
+        if self.llm_provider == "custom_openai" and not self.custom_openai_api_key:
+            raise ValueError(
+                "CUSTOM_OPENAI_API_KEY is required when LLM_PROVIDER=custom_openai"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_datasphere_config(self) -> Self:
+        """Validate Datasphere config when connector is needed."""
+        if self.datasphere_host and not all([
+            self.datasphere_client_id,
+            self.datasphere_client_secret,
+            self.datasphere_token_url,
+        ]):
+            raise ValueError(
+                "DATASPHERE_CLIENT_ID, DATASPHERE_CLIENT_SECRET, and "
+                "DATASPHERE_TOKEN_URL are required when DATASPHERE_HOST is set"
             )
         return self
 

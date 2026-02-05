@@ -7,6 +7,7 @@ from langchain_core.language_models import BaseChatModel
 
 from app.api.sessions import SessionStore
 from app.config import get_settings
+from app.connectors.datasphere import DatasphereConnector
 from app.connectors.postgres import PostgresConnector
 from app.core import Agent, SkillRegistry
 from app.core.comparison_engine import ComparisonCache, ComparisonEngine
@@ -16,6 +17,7 @@ from app.db.connection import get_db_session
 from app.llm import LLMProvider, create_llm_provider
 from app.rag import RAGManager, VectorStore, create_embeddings
 from app.skills.data_analyst import DataAnalystSkill
+from app.skills.datasphere import DatasphereSkill
 
 
 @lru_cache
@@ -82,13 +84,47 @@ def get_data_analyst_skill() -> DataAnalystSkill:
 
 
 @lru_cache
+def get_datasphere_connector() -> DatasphereConnector | None:
+    """Get cached Datasphere connector if configured."""
+    settings = get_settings()
+
+    if not settings.datasphere_host:
+        return None
+
+    return DatasphereConnector(
+        host=settings.datasphere_host,
+        space=settings.datasphere_space,
+        client_id=settings.datasphere_client_id,
+        client_secret=settings.datasphere_client_secret,
+        token_url=settings.datasphere_token_url,
+        port=settings.datasphere_port,
+        timeout=settings.datasphere_timeout,
+        max_connections=settings.datasphere_max_connections,
+    )
+
+
+@lru_cache
+def get_datasphere_skill() -> DatasphereSkill | None:
+    """Get cached Datasphere skill if connector is configured."""
+    connector = get_datasphere_connector()
+    if connector is None:
+        return None
+    return DatasphereSkill(connector)
+
+
+@lru_cache
 def get_skill_registry() -> SkillRegistry:
     """Get cached skill registry with all skills registered."""
     registry = SkillRegistry()
 
-    # Register data analyst skill
-    skill = get_data_analyst_skill()
-    registry.register(skill)
+    # Register data analyst skill (always available)
+    data_analyst = get_data_analyst_skill()
+    registry.register(data_analyst)
+
+    # Register Datasphere skill if configured
+    datasphere = get_datasphere_skill()
+    if datasphere:
+        registry.register(datasphere)
 
     return registry
 

@@ -12,6 +12,7 @@ from app.config import get_settings
 from app.db import close_db, init_db
 from app.dependencies import (
     get_business_connector,
+    get_datasphere_connector,
     get_llm_provider,
     get_rag_manager,
     get_skill_registry,
@@ -50,6 +51,15 @@ async def lifespan(app: FastAPI):
     logger.info("Skills registered: %d", registry.skill_count)
     logger.info("Tools available: %d", registry.tool_count)
 
+    # Initialize Datasphere connector if configured
+    datasphere = get_datasphere_connector()
+    if datasphere:
+        try:
+            await datasphere.connect()
+            logger.info("Datasphere connector initialized for space: %s", datasphere.space)
+        except Exception as e:
+            logger.warning("Datasphere initialization failed: %s", e)
+
     # Ingest knowledge on startup
     try:
         rag_manager = get_rag_manager()
@@ -63,6 +73,15 @@ async def lifespan(app: FastAPI):
 
     # Cleanup resources
     logger.info("Shutting down...")
+
+    # Close Datasphere connector
+    if datasphere:
+        try:
+            await datasphere.close()
+            logger.debug("Datasphere connector closed")
+        except Exception as e:
+            logger.warning("Error closing Datasphere connector: %s", e)
+
     try:
         connector = get_business_connector()
         await connector.close()
