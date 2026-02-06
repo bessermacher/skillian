@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
 from app.config import Settings
-from app.core import BaseSkill, SkillRegistry, Tool
+from app.core import SkillRegistry, Tool
 
 
 @pytest.fixture(autouse=True)
@@ -78,7 +78,7 @@ def async_tool() -> Tool:
     )
 
 
-class TestSkill(BaseSkill):
+class TestSkill:
     """Test skill implementation."""
 
     def __init__(self, tools: list[Tool] | None = None):
@@ -99,6 +99,16 @@ class TestSkill(BaseSkill):
     @property
     def system_prompt(self) -> str:
         return "You are a test assistant."
+
+    @property
+    def knowledge_paths(self) -> list[str]:
+        return []
+
+    def get_tool(self, name: str) -> Tool | None:
+        for tool in self._tools:
+            if tool.name == name:
+                return tool
+        return None
 
 
 @pytest.fixture

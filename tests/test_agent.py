@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from pydantic import BaseModel
 
-from app.core import Agent, BaseSkill, SkillRegistry, Tool
+from app.core import Agent, ConfiguredSkill, SkillRegistry, Tool
 
 
 class DummyInput(BaseModel):
@@ -16,36 +16,27 @@ def dummy_tool_func(query: str) -> dict:
     return {"result": f"Processed: {query}"}
 
 
-class DummySkill(BaseSkill):
-    @property
-    def name(self) -> str:
-        return "dummy"
-
-    @property
-    def description(self) -> str:
-        return "Dummy skill for testing"
-
-    @property
-    def tools(self) -> list[Tool]:
-        return [
+def create_dummy_skill() -> ConfiguredSkill:
+    return ConfiguredSkill(
+        name="dummy",
+        description="Dummy skill for testing",
+        system_prompt="You are a dummy assistant.",
+        tools=[
             Tool(
                 name="dummy_query",
                 description="A dummy query tool",
                 function=dummy_tool_func,
                 input_schema=DummyInput,
             )
-        ]
-
-    @property
-    def system_prompt(self) -> str:
-        return "You are a dummy assistant."
+        ],
+    )
 
 
 class TestAgent:
     @pytest.fixture
     def registry(self):
         reg = SkillRegistry()
-        reg.register(DummySkill())
+        reg.register(create_dummy_skill())
         return reg
 
     @pytest.fixture

@@ -4,7 +4,6 @@ import pytest
 from pydantic import BaseModel
 
 from app.core import (
-    BaseSkill,
     DuplicateSkillError,
     DuplicateToolError,
     SkillNotFoundError,
@@ -31,7 +30,7 @@ def create_tool(name: str) -> Tool:
     )
 
 
-class SkillA(BaseSkill):
+class SkillA:
     @property
     def name(self) -> str:
         return "skill_a"
@@ -48,8 +47,18 @@ class SkillA(BaseSkill):
     def system_prompt(self) -> str:
         return "You are skill A."
 
+    @property
+    def knowledge_paths(self) -> list[str]:
+        return []
 
-class SkillB(BaseSkill):
+    def get_tool(self, name: str) -> Tool | None:
+        for tool in self.tools:
+            if tool.name == name:
+                return tool
+        return None
+
+
+class SkillB:
     @property
     def name(self) -> str:
         return "skill_b"
@@ -66,8 +75,18 @@ class SkillB(BaseSkill):
     def system_prompt(self) -> str:
         return "You are skill B."
 
+    @property
+    def knowledge_paths(self) -> list[str]:
+        return []
 
-class SkillWithConflict(BaseSkill):
+    def get_tool(self, name: str) -> Tool | None:
+        for tool in self.tools:
+            if tool.name == name:
+                return tool
+        return None
+
+
+class SkillWithConflict:
     """Skill with tool name that conflicts with SkillA."""
 
     @property
@@ -85,6 +104,16 @@ class SkillWithConflict(BaseSkill):
     @property
     def system_prompt(self) -> str:
         return "Conflict."
+
+    @property
+    def knowledge_paths(self) -> list[str]:
+        return []
+
+    def get_tool(self, name: str) -> Tool | None:
+        for tool in self.tools:
+            if tool.name == name:
+                return tool
+        return None
 
 
 class TestSkillRegistry:

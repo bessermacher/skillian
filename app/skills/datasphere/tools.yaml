@@ -1,0 +1,91 @@
+tools:
+  - name: ds_list_entities
+    description: |
+      List all available entities (views and tables) in the
+      SAP Datasphere space. Use this first to discover what data
+      is available for querying.
+    parameters: []
+    implementation: app.skills.datasphere.tools:list_entities
+
+  - name: ds_query_entity
+    description: |
+      Query a SAP Datasphere entity (view or table) using OData.
+      Supports field selection, filtering, ordering, and pagination.
+      Use this for exploring data and retrieving specific records.
+    parameters:
+      - name: entity
+        type: string
+        required: true
+        description: Name of the entity (view/table) to query
+      - name: select
+        type: array
+        required: false
+        description: Fields to return. If not specified, all fields are returned.
+      - name: filter_expr
+        type: string
+        required: false
+        description: "OData filter expression, e.g., \"CALMONTH eq '202401'\""
+      - name: top
+        type: integer
+        required: false
+        default: 100
+        description: Maximum number of rows to return (default 100)
+      - name: orderby
+        type: string
+        required: false
+        description: "Order by field, e.g., 'AMOUNT desc'"
+    implementation: app.skills.datasphere.tools:query_entity
+
+  - name: ds_execute_sql
+    description: |
+      Execute a SQL SELECT query against SAP Datasphere.
+      Use this for complex queries that require joins,
+      aggregations, or features not available via OData.
+      Only SELECT statements are allowed.
+    parameters:
+      - name: query
+        type: string
+        required: true
+        description: SQL query to execute. Use SELECT statements only.
+    implementation: app.skills.datasphere.tools:execute_sql
+
+  - name: ds_get_metadata
+    description: |
+      Get metadata for a specific entity including field names,
+      data types, and descriptions. Use this to understand the
+      structure of an entity before querying.
+    parameters:
+      - name: entity
+        type: string
+        required: true
+        description: Name of the entity to get metadata for
+    implementation: app.skills.datasphere.tools:get_entity_metadata
+
+  - name: ds_compare_entities
+    description: |
+      Compare a numeric measure between two entities.
+      Useful for data reconciliation, finding discrepancies,
+      and validating data across different sources or time periods.
+      Returns differences and percentage variances.
+    parameters:
+      - name: entity_a
+        type: string
+        required: true
+        description: First entity name (reference)
+      - name: entity_b
+        type: string
+        required: true
+        description: Second entity name (to compare)
+      - name: measure
+        type: string
+        required: true
+        description: Measure/numeric field to compare
+      - name: group_by
+        type: array
+        required: false
+        description: Dimensions to group and align comparison on
+      - name: filter_expr
+        type: string
+        required: false
+        description: OData filter to apply to both entities
+    implementation: app.skills.datasphere.tools:compare_entities

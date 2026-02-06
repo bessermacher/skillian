@@ -6,8 +6,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from app.core.query_engine import QueryEngine, QueryResult
-from app.core.source_registry import SourceRegistry
+from app.skills.data_analyst.query_engine import QueryEngine, QueryResult
+from app.skills.data_analyst.source_registry import SourceRegistry
 
 
 class DiffStatus(StrEnum):

@@ -5,72 +5,19 @@ following Anthropic best practices: consolidated functionality,
 clear documentation-style descriptions, and meaningful responses.
 """
 
+from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
-
-from app.core.comparison_engine import ComparisonEngine, ComparisonResult
-from app.core.query_engine import QueryEngine
-from app.core.source_registry import SourceRegistry
-
-
-class ListSourcesInput(BaseModel):
-    """Input for list_sources tool - no parameters needed."""
-
-    pass
-
-
-class QuerySourceInput(BaseModel):
-    """Input for querying a single data source.
-
-    Parameters:
-        source: Name of the source to query (e.g., 'fi_reporting', 'bpc_reporting')
-        dimensions: List of dimensions to group by. If not specified, uses source defaults.
-        measures: List of measures to aggregate. If not specified, uses all measures.
-        filters: Filter conditions as dimension:value pairs.
-    """
-
-    source: str = Field(description="Name of the source to query")
-    dimensions: list[str] | None = Field(
-        default=None, description="Dimensions to group by (uses defaults if not specified)"
-    )
-    measures: list[str] | None = Field(
-        default=None, description="Measures to aggregate (uses all if not specified)"
-    )
-    filters: dict[str, str] | None = Field(
-        default=None, description="Filter conditions as dimension:value pairs"
-    )
-
-
-class CompareSourcesInput(BaseModel):
-    """Input for comparing two data sources.
-
-    Parameters:
-        source_a: First source name (reference/expected)
-        source_b: Second source name (to compare against)
-        measure: The measure to compare (e.g., 'amount', 'quantity')
-        align_on: Dimensions to align the comparison on. If not specified, uses configured defaults.
-        filters: Filter conditions to apply to both sources.
-    """
-
-    source_a: str = Field(description="First source name (reference)")
-    source_b: str = Field(description="Second source name (to compare)")
-    measure: str = Field(description="Measure to compare (e.g., 'amount')")
-    align_on: list[str] | None = Field(
-        default=None, description="Dimensions to align on (uses defaults if not specified)"
-    )
-    filters: dict[str, str] | None = Field(
-        default=None, description="Filters to apply to both sources"
-    )
+from app.skills.data_analyst.comparison_engine import ComparisonEngine, ComparisonResult
+from app.skills.data_analyst.query_engine import QueryEngine
+from app.skills.data_analyst.source_registry import SourceRegistry
 
 
 def _format_comparison_result(result: ComparisonResult) -> dict[str, Any]:
     """Format comparison result for LLM-friendly output."""
-    # Identify key differences
     major_diffs = [r for r in result.rows if r.status.value == "major_diff"]
     minor_diffs = [r for r in result.rows if r.status.value == "minor_diff"]
 
-    # Format top differences
     top_diffs = []
     for row in sorted(major_diffs + minor_diffs, key=lambda r: r.absolute_diff, reverse=True)[:5]:
         top_diffs.append({
@@ -130,14 +77,13 @@ def _generate_interpretation(result: ComparisonResult) -> str:
         )
 
 
-class DataAnalystTools:
-    """Tool implementations for data analyst skill.
+# Module-level tools instance cache
+_tools_instance: "DataAnalystTools | None" = None
+_tools_connector: Any = None
 
-    Provides consolidated tools following Anthropic's recommendations:
-    - Few powerful tools rather than many small ones
-    - Clear, documentation-style descriptions
-    - Meaningful, structured responses
-    """
+
+class DataAnalystTools:
+    """Tool implementations for data analyst skill."""
 
     def __init__(
         self,
@@ -145,26 +91,12 @@ class DataAnalystTools:
         query_engine: QueryEngine,
         comparison_engine: ComparisonEngine,
     ):
-        """Initialize tools with required engines.
-
-        Args:
-            registry: Source registry for definitions.
-            query_engine: Engine for executing queries.
-            comparison_engine: Engine for comparing sources.
-        """
         self._registry = registry
         self._query_engine = query_engine
         self._comparison_engine = comparison_engine
 
     def list_sources(self) -> dict[str, Any]:
-        """List all available data sources with their descriptions and fields.
-
-        Returns a structured overview of all configured data sources,
-        including available dimensions and measures for each.
-
-        Returns:
-            Dictionary with sources list and metadata.
-        """
+        """List all available data sources with their descriptions and fields."""
         sources_info = self._registry.get_source_info()
 
         return {
@@ -197,20 +129,7 @@ class DataAnalystTools:
         measures: list[str] | None = None,
         filters: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        """Query a single data source with optional grouping and filtering.
-
-        Executes an aggregation query against the specified source,
-        grouping by dimensions and calculating measure aggregates.
-
-        Args:
-            source: Source name to query.
-            dimensions: Dimensions to group by.
-            measures: Measures to aggregate.
-            filters: Filter conditions.
-
-        Returns:
-            Query results with rows and metadata.
-        """
+        """Query a single data source with optional grouping and filtering."""
         source_def = self._registry.get(source)
         result = await self._query_engine.query(
             source_def,
@@ -224,7 +143,7 @@ class DataAnalystTools:
             "row_count": result.row_count,
             "dimensions_used": result.dimensions_used,
             "measures_used": result.measures_used,
-            "rows": result.rows[:100],  # Limit to first 100 rows
+            "rows": result.rows[:100],
             "truncated": result.row_count > 100,
         }
 
@@ -236,23 +155,7 @@ class DataAnalystTools:
         align_on: list[str] | None = None,
         filters: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        """Compare measure values between two data sources.
-
-        Aligns rows from both sources on common dimensions and compares
-        the specified measure values. Classifies differences as match,
-        minor, or major based on configured thresholds.
-
-        Args:
-            source_a: Reference source name.
-            source_b: Comparison source name.
-            measure: Measure to compare.
-            align_on: Dimensions to align on.
-            filters: Filters to apply to both sources.
-
-        Returns:
-            Structured comparison result with summary, top differences,
-            and cache key for drill-down queries.
-        """
+        """Compare measure values between two data sources."""
         result = await self._comparison_engine.compare(
             source_a_name=source_a,
             source_b_name=source_b,
@@ -262,3 +165,63 @@ class DataAnalystTools:
         )
 
         return _format_comparison_result(result)
+
+
+def _get_tools_instance(connector: Any) -> DataAnalystTools:
+    """Get or create the DataAnalystTools singleton."""
+    global _tools_instance, _tools_connector
+
+    if _tools_instance is None or _tools_connector is not connector:
+        config_path = Path("config/sources.yaml")
+        registry = SourceRegistry(config_path)
+        query_engine = QueryEngine(connector)
+        comparison_engine = ComparisonEngine(registry, query_engine)
+        _tools_instance = DataAnalystTools(registry, query_engine, comparison_engine)
+        _tools_connector = connector
+
+    return _tools_instance
+
+
+# Standalone tool functions for YAML loader
+
+
+def list_sources(connector: Any = None) -> dict[str, Any]:
+    """List all available data sources."""
+    tools = _get_tools_instance(connector)
+    return tools.list_sources()
+
+
+async def query_source(
+    source: str,
+    dimensions: list[str] | None = None,
+    measures: list[str] | None = None,
+    filters: dict[str, str] | None = None,
+    connector: Any = None,
+) -> dict[str, Any]:
+    """Query a single data source with aggregation."""
+    tools = _get_tools_instance(connector)
+    return await tools.query_source(
+        source=source,
+        dimensions=dimensions,
+        measures=measures,
+        filters=filters,
+    )
+
+
+async def compare_sources(
+    source_a: str,
+    source_b: str,
+    measure: str,
+    align_on: list[str] | None = None,
+    filters: dict[str, str] | None = None,
+    connector: Any = None,
+) -> dict[str, Any]:
+    """Compare measure values between two data sources."""
+    tools = _get_tools_instance(connector)
+    return await tools.compare_sources(
+        source_a=source_a,
+        source_b=source_b,
+        measure=measure,
+        align_on=align_on,
+        filters=filters,
+    )
