@@ -5,15 +5,15 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.core.comparison_engine import (
+from app.skills.data_analyst.comparison_engine import (
     ComparisonCache,
     ComparisonEngine,
     ComparisonResult,
     DiffStatus,
     RowComparison,
 )
-from app.core.query_engine import QueryResult
-from app.core.source_registry import (
+from app.skills.data_analyst.query_engine import QueryResult
+from app.skills.data_analyst.source_registry import (
     ComparisonConfig,
     ComparisonThreshold,
     DimensionDef,

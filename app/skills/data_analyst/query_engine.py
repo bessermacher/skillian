@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.connectors.postgres import PostgresConnector
-from app.core.source_registry import SourceDef
+from app.skills.data_analyst.source_registry import SourceDef
 
 
 @dataclass

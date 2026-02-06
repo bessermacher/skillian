@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncGenerator
 from functools import lru_cache
+from pathlib import Path
 
 from langchain_core.language_models import BaseChatModel
 
@@ -10,14 +11,10 @@ from app.config import get_settings
 from app.connectors.datasphere import DatasphereConnector
 from app.connectors.postgres import PostgresConnector
 from app.core import Agent, SkillRegistry
-from app.core.comparison_engine import ComparisonCache, ComparisonEngine
-from app.core.query_engine import QueryEngine
-from app.core.source_registry import SourceRegistry
+from app.core.skill_loader import SkillLoader
 from app.db.connection import get_db_session
 from app.llm import LLMProvider, create_llm_provider
 from app.rag import RAGManager, VectorStore, create_embeddings
-from app.skills.data_analyst import DataAnalystSkill
-from app.skills.datasphere import DatasphereSkill
 
 
 @lru_cache
@@ -34,53 +31,10 @@ def get_chat_model() -> BaseChatModel:
 
 
 @lru_cache
-def get_source_registry() -> SourceRegistry:
-    """Get cached source registry."""
-    return SourceRegistry("config/sources.yaml")
-
-
-@lru_cache
 def get_business_connector() -> PostgresConnector:
     """Get cached PostgreSQL connector for business data."""
     settings = get_settings()
     return PostgresConnector(settings.business_database_url)
-
-
-@lru_cache
-def get_query_engine() -> QueryEngine:
-    """Get cached query engine."""
-    connector = get_business_connector()
-    return QueryEngine(connector)
-
-
-@lru_cache
-def get_comparison_cache() -> ComparisonCache:
-    """Get cached comparison cache."""
-    registry = get_source_registry()
-    ttl = (
-        registry.comparison_config.cache_ttl_seconds
-        if registry.comparison_config
-        else 3600
-    )
-    return ComparisonCache(ttl_seconds=ttl)
-
-
-@lru_cache
-def get_comparison_engine() -> ComparisonEngine:
-    """Get cached comparison engine."""
-    registry = get_source_registry()
-    query_engine = get_query_engine()
-    cache = get_comparison_cache()
-    return ComparisonEngine(registry, query_engine, cache)
-
-
-@lru_cache
-def get_data_analyst_skill() -> DataAnalystSkill:
-    """Get cached data analyst skill."""
-    registry = get_source_registry()
-    query_engine = get_query_engine()
-    comparison_engine = get_comparison_engine()
-    return DataAnalystSkill(registry, query_engine, comparison_engine)
 
 
 @lru_cache
@@ -104,27 +58,31 @@ def get_datasphere_connector() -> DatasphereConnector | None:
 
 
 @lru_cache
-def get_datasphere_skill() -> DatasphereSkill | None:
-    """Get cached Datasphere skill if connector is configured."""
-    connector = get_datasphere_connector()
-    if connector is None:
-        return None
-    return DatasphereSkill(connector)
+def get_skill_loader() -> SkillLoader:
+    """Get cached skill loader with connector factory."""
+    connector_factory = {}
+
+    connector_factory["postgres"] = get_business_connector()
+    connector_factory["business"] = get_business_connector()
+
+    datasphere = get_datasphere_connector()
+    if datasphere:
+        connector_factory["datasphere"] = datasphere
+
+    return SkillLoader(
+        skills_dir=Path("app/skills"),
+        connector_factory=connector_factory,
+    )
 
 
 @lru_cache
 def get_skill_registry() -> SkillRegistry:
-    """Get cached skill registry with all skills registered."""
+    """Get cached skill registry with auto-discovered skills."""
     registry = SkillRegistry()
+    loader = get_skill_loader()
 
-    # Register data analyst skill (always available)
-    data_analyst = get_data_analyst_skill()
-    registry.register(data_analyst)
-
-    # Register Datasphere skill if configured
-    datasphere = get_datasphere_skill()
-    if datasphere:
-        registry.register(datasphere)
+    for skill in loader.load_all_skills():
+        registry.register(skill)
 
     return registry
 

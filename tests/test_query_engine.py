@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.core.query_engine import QueryEngine, QueryResult
-from app.core.source_registry import DimensionDef, MeasureDef, SourceDef
+from app.skills.data_analyst.query_engine import QueryEngine, QueryResult
+from app.skills.data_analyst.source_registry import DimensionDef, MeasureDef, SourceDef
 
 
 @pytest.fixture

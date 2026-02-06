@@ -4,7 +4,7 @@
 import pytest
 import yaml
 
-from app.core.source_registry import (
+from app.skills.data_analyst.source_registry import (
     SourceNotFoundError,
     SourceRegistry,
 )

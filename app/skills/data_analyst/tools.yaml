@@ -1,0 +1,81 @@
+tools:
+  - name: list_sources
+    description: |
+      List all available data sources.
+
+      Returns information about each configured data source including:
+      - Source name and description
+      - Available dimensions (grouping fields)
+      - Available measures (aggregatable values)
+      - Valid comparison pairs based on common dimensions
+
+      Use this tool first to understand what data sources are available
+      before querying or comparing them.
+    parameters: []
+    implementation: app.skills.data_analyst.tools:list_sources
+
+  - name: query_source
+    description: |
+      Query a single data source with aggregation.
+
+      Executes a query against one data source, grouping by specified
+      dimensions and aggregating measures. Use this to:
+      - Explore data in a single source
+      - Get totals by specific dimensions
+      - Filter data before analysis
+
+      Returns rows with dimension values and aggregated measures.
+    parameters:
+      - name: source
+        type: string
+        required: true
+        description: Name of the source to query (from list_sources)
+      - name: dimensions
+        type: array
+        required: false
+        description: Fields to group by (uses defaults if not specified)
+      - name: measures
+        type: array
+        required: false
+        description: Values to aggregate (uses all if not specified)
+      - name: filters
+        type: object
+        required: false
+        description: Filter conditions as dimension:value pairs
+    implementation: app.skills.data_analyst.tools:query_source
+
+  - name: compare_sources
+    description: |
+      Compare measure values between two data sources.
+
+      This is the primary tool for data reconciliation. It aligns rows
+      from two sources on common dimensions and compares a specified
+      measure. Differences are classified as:
+      - match: Within configured tolerance
+      - minor_diff: Notable but acceptable difference
+      - major_diff: Significant discrepancy requiring investigation
+
+      Returns summary statistics, top differences, and a cache key
+      for follow-up queries on the same comparison.
+    parameters:
+      - name: source_a
+        type: string
+        required: true
+        description: Reference source (source of truth)
+      - name: source_b
+        type: string
+        required: true
+        description: Source to compare against
+      - name: measure
+        type: string
+        required: true
+        description: The value to compare (e.g., 'amount')
+      - name: align_on
+        type: array
+        required: false
+        description: Dimensions to match rows on (uses defaults if not specified)
+      - name: filters
+        type: object
+        required: false
+        description: Conditions to apply to both sources
+    implementation: app.skills.data_analyst.tools:compare_sources
