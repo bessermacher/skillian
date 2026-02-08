@@ -1,19 +1,19 @@
-"""SAP Datasphere connector with OAuth2 authentication."""
+"""SAP Datasphere connector using hdbcli for direct database access."""
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
 from typing import Any
 
-import httpx
+from hdbcli import dbapi
 
 
 class DatasphereError(Exception):
     """Base exception for Datasphere operations."""
 
 
-class DatasphereAuthError(DatasphereError):
-    """Authentication failed."""
+class DatasphereConnectionError(DatasphereError):
+    """Connection failed."""
 
 
 class DatasphereQueryError(DatasphereError):
@@ -21,33 +21,20 @@ class DatasphereQueryError(DatasphereError):
 
 
 @dataclass
-class OAuthToken:
-    """OAuth2 token with expiry tracking."""
-
-    access_token: str
-    expires_at: datetime
-    token_type: str = "Bearer"
-
-    @property
-    def is_expired(self) -> bool:
-        """Check if token is expired (with 60s buffer)."""
-        return datetime.now() >= self.expires_at - timedelta(seconds=60)
-
-
-@dataclass
 class DatasphereConnector:
-    """Async connector for SAP Datasphere.
+    """Connector for SAP Datasphere using hdbcli.
 
-    Handles OAuth2 authentication and query execution via OData/SQL endpoints.
-    Uses connection pooling for efficient resource usage.
+    Uses the SAP HANA Python client (hdbcli) to connect directly to the
+    Datasphere HANA database. Requires a database user created in
+    Datasphere Space Management.
+
+    Note: Your IP address may need to be added to Datasphere's IP allow-list.
 
     Example:
         connector = DatasphereConnector(
-            host="your-tenant.datasphere.cloud.sap",
-            space="YOUR_SPACE",
-            client_id="...",
-            client_secret="...",
-            token_url="https://your-tenant.authentication.sap.hana.ondemand.com/oauth/token",
+            host="your-tenant.hana.prod-eu10.hanacloud.ondemand.com",
+            user="DBUSER#YOUR_SPACE",
+            password="your-password",
         )
         await connector.connect()
         results = await connector.execute_sql("SELECT * FROM view_name LIMIT 10")
@@ -55,108 +42,64 @@ class DatasphereConnector:
     """
 
     host: str
-    space: str
-    client_id: str
-    client_secret: str
-    token_url: str
+    user: str
+    password: str
     port: int = 443
+    encrypt: bool = True
+    ssl_validate_certificate: bool = True
     timeout: int = 60
-    max_connections: int = 10
+    pool_size: int = 4
 
-    _client: httpx.AsyncClient | None = field(default=None, init=False, repr=False)
-    _token: OAuthToken | None = field(default=None, init=False, repr=False)
+    _connection: dbapi.Connection | None = field(default=None, init=False, repr=False)
+    _executor: ThreadPoolExecutor | None = field(default=None, init=False, repr=False)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
 
-    @property
-    def base_url(self) -> str:
-        """Base URL for Datasphere API."""
-        return f"https://{self.host}:{self.port}"
-
-    @property
-    def odata_url(self) -> str:
-        """OData service URL."""
-        return f"{self.base_url}/api/v1/dwc/consumption/relational/{self.space}"
-
-    @property
-    def sql_url(self) -> str:
-        """SQL execution endpoint."""
-        return f"{self.base_url}/api/v1/dwc/sql/{self.space}"
-
     async def connect(self) -> None:
-        """Initialize the HTTP client and authenticate."""
-        if self._client is not None:
+        """Initialize the database connection."""
+        if self._connection is not None:
             return
 
-        self._client = httpx.AsyncClient(
-            timeout=httpx.Timeout(self.timeout),
-            limits=httpx.Limits(
-                max_connections=self.max_connections,
-                max_keepalive_connections=self.max_connections // 2,
-            ),
+        self._executor = ThreadPoolExecutor(max_workers=self.pool_size)
+
+        loop = asyncio.get_event_loop()
+        try:
+            self._connection = await loop.run_in_executor(
+                self._executor,
+                self._create_connection,
+            )
+        except dbapi.Error as e:
+            raise DatasphereConnectionError(f"Connection failed: {e}") from e
+
+    def _create_connection(self) -> dbapi.Connection:
+        """Create a synchronous hdbcli connection."""
+        return dbapi.connect(
+            address=self.host,
+            port=self.port,
+            user=self.user,
+            password=self.password,
+            encrypt=self.encrypt,
+            sslValidateCertificate=self.ssl_validate_certificate,
+            connectTimeout=self.timeout * 1000,  # milliseconds
         )
 
-        await self._refresh_token()
-
     async def close(self) -> None:
-        """Close the HTTP client."""
-        if self._client:
-            await self._client.aclose()
-            self._client = None
-            self._token = None
+        """Close the database connection."""
+        if self._connection:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                self._executor,
+                self._connection.close,
+            )
+            self._connection = None
 
-    async def _refresh_token(self) -> None:
-        """Obtain or refresh OAuth2 token."""
-        if self._client is None:
-            raise DatasphereError("Connector not connected. Call connect() first.")
-
-        async with self._lock:
-            # Double-check after acquiring lock
-            if self._token and not self._token.is_expired:
-                return
-
-            try:
-                response = await self._client.post(
-                    self.token_url,
-                    data={
-                        "grant_type": "client_credentials",
-                        "client_id": self.client_id,
-                        "client_secret": self.client_secret,
-                    },
-                    headers={"Content-Type": "application/x-www-form-urlencoded"},
-                )
-                response.raise_for_status()
-
-                data = response.json()
-                expires_in = data.get("expires_in", 3600)
-
-                self._token = OAuthToken(
-                    access_token=data["access_token"],
-                    expires_at=datetime.now() + timedelta(seconds=expires_in),
-                    token_type=data.get("token_type", "Bearer"),
-                )
-
-            except httpx.HTTPStatusError as e:
-                raise DatasphereAuthError(
-                    f"Authentication failed: {e.response.status_code} - {e.response.text}"
-                ) from e
-            except Exception as e:
-                raise DatasphereAuthError(f"Authentication failed: {e}") from e
-
-    async def _get_headers(self) -> dict[str, str]:
-        """Get request headers with valid auth token."""
-        if self._token is None or self._token.is_expired:
-            await self._refresh_token()
-
-        return {
-            "Authorization": f"{self._token.token_type} {self._token.access_token}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        }
+        if self._executor:
+            self._executor.shutdown(wait=False)
+            self._executor = None
 
     async def execute_sql(
         self,
         query: str,
-        parameters: dict[str, Any] | None = None,
+        parameters: tuple[Any, ...] | list[Any] | None = None,
     ) -> list[dict[str, Any]]:
         """Execute a SQL query against Datasphere.
 
@@ -170,132 +113,142 @@ class DatasphereConnector:
         Raises:
             DatasphereQueryError: If query execution fails
         """
-        if self._client is None:
+        if self._connection is None:
             raise DatasphereError("Connector not connected. Call connect() first.")
 
-        headers = await self._get_headers()
-
-        payload = {"query": query}
-        if parameters:
-            payload["parameters"] = parameters
-
+        loop = asyncio.get_event_loop()
         try:
-            response = await self._client.post(
-                self.sql_url,
-                json=payload,
-                headers=headers,
+            return await loop.run_in_executor(
+                self._executor,
+                self._execute_sql_sync,
+                query,
+                parameters,
             )
-            response.raise_for_status()
-
-            data = response.json()
-            return data.get("results", [])
-
-        except httpx.HTTPStatusError as e:
-            raise DatasphereQueryError(
-                f"Query failed: {e.response.status_code} - {e.response.text}"
-            ) from e
-        except Exception as e:
+        except dbapi.Error as e:
             raise DatasphereQueryError(f"Query failed: {e}") from e
 
-    async def execute_odata(
+    def _execute_sql_sync(
         self,
-        entity: str,
-        select: list[str] | None = None,
-        filter_expr: str | None = None,
-        top: int | None = None,
-        skip: int | None = None,
-        orderby: str | None = None,
+        query: str,
+        parameters: tuple[Any, ...] | list[Any] | None,
     ) -> list[dict[str, Any]]:
-        """Execute an OData query against a Datasphere view/table.
+        """Execute SQL synchronously (runs in executor)."""
+        cursor = self._connection.cursor()
+        try:
+            if parameters:
+                cursor.execute(query, parameters)
+            else:
+                cursor.execute(query)
+
+            if cursor.description is None:
+                return []
+
+            columns = [desc[0] for desc in cursor.description]
+            rows = cursor.fetchall()
+            return [dict(zip(columns, row, strict=False)) for row in rows]
+        finally:
+            cursor.close()
+
+    async def execute_many(
+        self,
+        query: str,
+        parameters_list: list[tuple[Any, ...] | list[Any]],
+    ) -> int:
+        """Execute a SQL statement with multiple parameter sets.
 
         Args:
-            entity: Entity set name (view or table name)
-            select: Fields to select
-            filter_expr: OData filter expression
-            top: Maximum number of results
-            skip: Number of results to skip
-            orderby: Order by expression
+            query: SQL statement (INSERT, UPDATE, etc.)
+            parameters_list: List of parameter tuples
 
         Returns:
-            List of result entities as dictionaries
+            Number of affected rows
         """
-        if self._client is None:
+        if self._connection is None:
             raise DatasphereError("Connector not connected. Call connect() first.")
 
-        headers = await self._get_headers()
-
-        # Build OData query parameters
-        params: dict[str, str] = {}
-        if select:
-            params["$select"] = ",".join(select)
-        if filter_expr:
-            params["$filter"] = filter_expr
-        if top:
-            params["$top"] = str(top)
-        if skip:
-            params["$skip"] = str(skip)
-        if orderby:
-            params["$orderby"] = orderby
-
-        url = f"{self.odata_url}/{entity}"
-
+        loop = asyncio.get_event_loop()
         try:
-            response = await self._client.get(url, params=params, headers=headers)
-            response.raise_for_status()
+            return await loop.run_in_executor(
+                self._executor,
+                self._execute_many_sync,
+                query,
+                parameters_list,
+            )
+        except dbapi.Error as e:
+            raise DatasphereQueryError(f"Batch execution failed: {e}") from e
 
-            data = response.json()
-            return data.get("value", [])
+    def _execute_many_sync(
+        self,
+        query: str,
+        parameters_list: list[tuple[Any, ...] | list[Any]],
+    ) -> int:
+        """Execute batch SQL synchronously (runs in executor)."""
+        cursor = self._connection.cursor()
+        try:
+            cursor.executemany(query, parameters_list)
+            self._connection.commit()
+            return cursor.rowcount
+        finally:
+            cursor.close()
 
-        except httpx.HTTPStatusError as e:
-            raise DatasphereQueryError(
-                f"OData query failed: {e.response.status_code} - {e.response.text}"
-            ) from e
-        except Exception as e:
-            raise DatasphereQueryError(f"OData query failed: {e}") from e
-
-    async def get_metadata(self, entity: str | None = None) -> dict[str, Any]:
-        """Retrieve metadata for entities in the space.
+    async def get_tables(self, schema: str | None = None) -> list[dict[str, Any]]:
+        """List available tables in the schema.
 
         Args:
-            entity: Specific entity name, or None for all metadata
+            schema: Schema name (defaults to user's default schema)
 
         Returns:
-            Metadata dictionary
+            List of table metadata dictionaries
         """
-        if self._client is None:
-            raise DatasphereError("Connector not connected. Call connect() first.")
+        query = """
+            SELECT TABLE_NAME, TABLE_TYPE, RECORD_COUNT
+            FROM TABLES
+            WHERE SCHEMA_NAME = CURRENT_SCHEMA
+        """
+        if schema:
+            query = f"""
+                SELECT TABLE_NAME, TABLE_TYPE, RECORD_COUNT
+                FROM TABLES
+                WHERE SCHEMA_NAME = '{schema}'
+            """
+        return await self.execute_sql(query)
 
-        headers = await self._get_headers()
+    async def get_columns(
+        self, table_name: str, schema: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Get column metadata for a table.
 
-        url = f"{self.odata_url}/$metadata"
-        if entity:
-            url = f"{self.odata_url}/{entity}/$metadata"
+        Args:
+            table_name: Name of the table
+            schema: Schema name (defaults to user's default schema)
 
-        try:
-            response = await self._client.get(url, headers=headers)
-            response.raise_for_status()
-            return response.json()
-
-        except httpx.HTTPStatusError as e:
-            raise DatasphereQueryError(f"Metadata query failed: {e.response.status_code}") from e
-
-    async def list_entities(self) -> list[str]:
-        """List available entities (views/tables) in the space."""
-        metadata = await self.get_metadata()
-        # Parse entity names from metadata
-        # Structure depends on Datasphere's metadata format
-        entities = []
-        for schema in metadata.get("schemas", []):
-            for entity in schema.get("entityTypes", []):
-                entities.append(entity.get("name"))
-        return entities
+        Returns:
+            List of column metadata dictionaries
+        """
+        schema_filter = f"SCHEMA_NAME = '{schema}'" if schema else "SCHEMA_NAME = CURRENT_SCHEMA"
+        query = f"""
+            SELECT COLUMN_NAME, DATA_TYPE_NAME, LENGTH, IS_NULLABLE, DEFAULT_VALUE
+            FROM TABLE_COLUMNS
+            WHERE {schema_filter} AND TABLE_NAME = '{table_name}'
+            ORDER BY POSITION
+        """
+        return await self.execute_sql(query)
 
     async def health_check(self) -> bool:
         """Check if Datasphere connection is healthy."""
         try:
-            if self._client is None:
+            if self._connection is None:
                 return False
-            await self._refresh_token()
-            return True
+            result = await self.execute_sql("SELECT 1 FROM DUMMY")
+            return len(result) == 1
         except Exception:
             return False
+
+    async def __aenter__(self) -> "DatasphereConnector":
+        """Async context manager entry."""
+        await self.connect()
+        return self
+
+    async def __aexit__(self, _exc_type, _exc_val, _exc_tb) -> None:
+        """Async context manager exit."""
+        await self.close()
