@@ -1,24 +1,23 @@
-# Skillian Architecture & Algorithms
+# Skillian Architecture
 
-This document explains how Skillian works through visualized algorithms and detailed explanations.
+Complete guide to understanding how Skillian works, from high-level concepts to implementation details.
 
 ## Table of Contents
 
-1. [System Overview](#system-overview)
+1. [Overview](#overview)
 2. [Core Concept: Skill = Tools + Knowledge + Prompt](#core-concept)
-3. [Request Flow Algorithm](#request-flow-algorithm)
-4. [Agent Orchestration Loop](#agent-orchestration-loop)
-5. [Tool Execution Algorithm](#tool-execution-algorithm)
-6. [Skill Registry & Routing](#skill-registry--routing)
-7. [LLM Provider Abstraction](#llm-provider-abstraction)
-8. [Connector Pattern](#connector-pattern)
-9. [Component Interactions](#component-interactions)
+3. [System Components](#system-components)
+4. [Request Flow](#request-flow)
+5. [Dependency Injection](#dependency-injection)
+6. [Key Design Patterns](#key-design-patterns)
+7. [Configuration](#configuration)
+8. [Adding New Components](#adding-new-components)
 
 ---
 
-## System Overview
+## Overview
 
-Skillian is an AI-powered assistant for diagnosing SAP BW data issues. The system uses a modular skill-based architecture where each domain (Financial, Sales, Inventory) has specialized tools and knowledge.
+Skillian is an AI-powered assistant for diagnosing SAP BW data issues. It uses a **skill-based architecture** where domain knowledge is encapsulated into modular, reusable components.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -36,28 +35,26 @@ Skillian is an AI-powered assistant for diagnosing SAP BW data issues. The syste
 │                   ┌─────────────────┐                  ┌──────────────┐ │
 │                   │  Skill Registry │                  │ LLM Provider │ │
 │                   │  ┌───────────┐  │                  │ (Ollama/     │ │
-│                   │  │ Financial │  │                  │  Claude/     │ │
-│                   │  │   Skill   │  │                  │  OpenAI)     │ │
-│                   │  ├───────────┤  │                  └──────────────┘ │
-│                   │  │   Sales   │  │                                   │
-│                   │  │   Skill   │  │                                   │
-│                   │  ├───────────┤  │                                   │
-│                   │  │ Inventory │  │                                   │
-│                   │  │   Skill   │  │                                   │
+│                   │  │   Data    │  │                  │  Claude/     │ │
+│                   │  │  Analyst  │  │                  │  OpenAI)     │ │
+│                   │  │   Skill   │  │                  └──────────────┘ │
 │                   │  └───────────┘  │                                   │
 │                   └────────┬────────┘                                   │
 │                            │                                            │
 │                            ▼                                            │
-│                   ┌─────────────────┐                                   │
-│                   │   Connectors    │                                   │
-│                   │ (Mock/HANA/RFC) │                                   │
-│                   └─────────────────┘                                   │
-│                            │                                            │
-│                            ▼                                            │
-│                   ┌─────────────────┐                                   │
-│                   │    SAP BW       │                                   │
-│                   │    Data         │                                   │
-│                   └─────────────────┘                                   │
+│          ┌─────────────────────────────────────────┐                   │
+│          │           Core Engines                   │                   │
+│          │  ┌───────────────┐  ┌────────────────┐  │                   │
+│          │  │ Comparison    │  │  Query         │  │                   │
+│          │  │ Engine        │  │  Engine        │  │                   │
+│          │  └───────────────┘  └────────────────┘  │                   │
+│          └──────────────┬──────────────────────────┘                   │
+│                         │                                               │
+│                         ▼                                               │
+│                ┌─────────────────┐     ┌──────────────────────┐        │
+│                │ PostgresConnect │     │   Source Registry    │        │
+│                │ (asyncpg pool)  │     │   (YAML config)      │        │
+│                └─────────────────┘     └──────────────────────┘        │
 │                                                                          │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -66,7 +63,7 @@ Skillian is an AI-powered assistant for diagnosing SAP BW data issues. The syste
 
 ## Core Concept
 
-The fundamental building block of Skillian is the **Skill**:
+The fundamental building block is the **Skill**:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -75,12 +72,12 @@ The fundamental building block of Skillian is the **Skill**:
 │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────┐  │
 │  │     TOOLS       │  │    KNOWLEDGE    │  │   SYSTEM PROMPT     │  │
 │  │                 │  │     (RAG)       │  │                     │  │
-│  │ • get_cost_     │  │                 │  │ "You are a          │  │
-│  │   center        │  │ • Markdown      │  │  financial analyst  │  │
-│  │ • list_cost_    │  │   documents     │  │  expert in SAP BW   │  │
-│  │   centers       │  │ • Domain        │  │  cost center        │  │
-│  │ • compare_      │  │   knowledge     │  │  analysis..."       │  │
-│  │   budget        │  │ • Best          │  │                     │  │
+│  │ • list_sources  │  │                 │  │ "You are a data     │  │
+│  │ • query_source  │  │ • Markdown      │  │  analyst expert     │  │
+│  │ • compare_      │  │   documents     │  │  specializing in    │  │
+│  │   sources       │  │ • Domain        │  │  SAP BW data        │  │
+│  │                 │  │   knowledge     │  │  reconciliation..." │  │
+│  │                 │  │ • Best          │  │                     │  │
 │  │                 │  │   practices     │  │                     │  │
 │  └─────────────────┘  └─────────────────┘  └─────────────────────┘  │
 │                                                                      │
@@ -96,19 +93,21 @@ Each tool follows a strict pattern with Pydantic validation:
 ┌─────────────────────────────────────────────────┐
 │                    TOOL                          │
 ├─────────────────────────────────────────────────┤
-│  name: "get_cost_center"                        │
-│  description: "Retrieve cost center details"    │
+│  name: "compare_sources"                        │
+│  description: "Compare measure between sources" │
 │                                                 │
 │  ┌─────────────────────────────────────────┐   │
 │  │         INPUT SCHEMA (Pydantic)          │   │
-│  │  cost_center_id: str (required)          │   │
-│  │  fiscal_year: int = 2024 (optional)      │   │
+│  │  source_a: str (required)                │   │
+│  │  source_b: str (required)                │   │
+│  │  measure: str (required)                 │   │
+│  │  filters: dict | None (optional)         │   │
 │  └─────────────────────────────────────────┘   │
 │                                                 │
 │  ┌─────────────────────────────────────────┐   │
 │  │         FUNCTION                         │   │
-│  │  async def get_cost_center(             │   │
-│  │      connector, cost_center_id, ...     │   │
+│  │  async def compare_sources(             │   │
+│  │      engine, source_a, source_b, ...    │   │
 │  │  ) -> dict                               │   │
 │  └─────────────────────────────────────────┘   │
 │                                                 │
@@ -117,23 +116,71 @@ Each tool follows a strict pattern with Pydantic validation:
 
 ---
 
-## Request Flow Algorithm
+## System Components
 
-When a user sends a message, it flows through the system as follows:
+### 1. API Layer (`app/api/`)
+
+| File | Purpose |
+|------|---------|
+| `routes.py` | FastAPI route handlers for `/chat`, `/sessions`, `/health` |
+| `schemas.py` | Request/response Pydantic models |
+
+### 2. Core (`app/core/`)
+
+| File | Purpose |
+|------|---------|
+| `agent.py` | Main orchestration loop - LLM + Tool execution |
+| `skill.py` | Skill protocol definition |
+| `tool.py` | Tool dataclass with Pydantic validation |
+| `registry.py` | Skill registration and tool routing |
+| `messages.py` | Conversation state management |
+| `comparison_engine.py` | Row alignment and diff classification |
+| `query_engine.py` | SQL generation from source definitions |
+| `source_registry.py` | YAML config loader for data sources |
+
+### 3. Skills (`app/skills/`)
+
+| Directory | Purpose |
+|-----------|---------|
+| `data_analyst/` | Data comparison and querying tools |
+
+### 4. LLM (`app/llm/`)
+
+| File | Purpose |
+|------|---------|
+| `protocol.py` | LLMProvider protocol definition |
+| `factory.py` | Provider factory (Ollama/Anthropic/OpenAI) |
+| `ollama.py` | Ollama local LLM implementation |
+| `anthropic.py` | Claude API implementation |
+| `openai.py` | OpenAI API implementation |
+
+### 5. Connectors (`app/connectors/`)
+
+| File | Purpose |
+|------|---------|
+| `postgres.py` | PostgreSQL async connector for business data |
+
+### 6. RAG (`app/rag/`)
+
+| File | Purpose |
+|------|---------|
+| `store.py` | pgvector-based knowledge retrieval |
+
+---
+
+## Request Flow
+
+When a user sends a message, it flows through the system:
 
 ```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                        REQUEST FLOW ALGORITHM                             │
-└──────────────────────────────────────────────────────────────────────────┘
-
-                    User: "What is the budget for CC-1001?"
+                    User: "Compare amounts between fi_reporting and bpc"
                                       │
                                       ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │ STEP 1: API RECEIVES REQUEST                                             │
 │                                                                          │
 │   POST /chat                                                             │
-│   Body: { "message": "What is the budget for CC-1001?" }                │
+│   Body: { "message": "Compare amounts between fi_reporting and bpc" }   │
 └────────────────────────────────────┬────────────────────────────────────┘
                                      │
                                      ▼
@@ -155,9 +202,10 @@ When a user sends a message, it flows through the system as follows:
                                      │
                                      ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│ STEP 3: AGENT PROCESSING (See Agent Loop below)                          │
+│ STEP 3: AGENT PROCESSING                                                 │
 │                                                                          │
-│   agent.process("What is the budget for CC-1001?")                      │
+│   agent.process("Compare amounts between fi_reporting and bpc")         │
+│   (See AGENT_LOOP.md for detailed algorithm)                            │
 │                                                                          │
 └────────────────────────────────────┬────────────────────────────────────┘
                                      │
@@ -166,9 +214,9 @@ When a user sends a message, it flows through the system as follows:
 │ STEP 4: RETURN RESPONSE                                                  │
 │                                                                          │
 │   {                                                                      │
-│     "response": "Cost center CC-1001 has a budget of $150,000...",      │
+│     "response": "The comparison shows 96.7% alignment...",              │
 │     "tool_calls": [                                                      │
-│       { "tool": "get_cost_center", "args": {...}, "result": {...} }     │
+│       { "tool": "compare_sources", "args": {...}, "result": {...} }     │
 │     ],                                                                   │
 │     "finished": true                                                     │
 │   }                                                                      │
@@ -177,662 +225,262 @@ When a user sends a message, it flows through the system as follows:
 
 ---
 
-## Agent Orchestration Loop
+## Dependency Injection
 
-The agent implements a **ReAct-style loop** (Reasoning + Acting):
-
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                    AGENT ORCHESTRATION ALGORITHM                          │
-└──────────────────────────────────────────────────────────────────────────┘
-
-                          ┌───────────────────┐
-                          │  User Message     │
-                          │  Received         │
-                          └─────────┬─────────┘
-                                    │
-                                    ▼
-                          ┌───────────────────┐
-                          │ Add to            │
-                          │ Conversation      │
-                          └─────────┬─────────┘
-                                    │
-        ┌───────────────────────────┼───────────────────────────┐
-        │                           ▼                           │
-        │                 ┌───────────────────┐                 │
-        │                 │ Convert to        │                 │
-        │    ITERATION    │ LangChain         │                 │
-        │      LOOP       │ Messages          │                 │
-        │   (max = 10)    └─────────┬─────────┘                 │
-        │                           │                           │
-        │                           ▼                           │
-        │                 ┌───────────────────┐                 │
-        │                 │ Call LLM          │                 │
-        │                 │ model.ainvoke()   │                 │
-        │                 └─────────┬─────────┘                 │
-        │                           │                           │
-        │                           ▼                           │
-        │                 ┌───────────────────┐                 │
-        │                 │ Has Tool Calls?   │                 │
-        │                 └─────────┬─────────┘                 │
-        │                           │                           │
-        │              ┌────────────┴────────────┐              │
-        │              │                         │              │
-        │            YES                        NO              │
-        │              │                         │              │
-        │              ▼                         ▼              │
-        │    ┌─────────────────┐      ┌─────────────────┐      │
-        │    │ Execute Each    │      │ Add Final       │      │
-        │    │ Tool            │      │ Response        │      │
-        │    └────────┬────────┘      └────────┬────────┘      │
-        │             │                        │                │
-        │             ▼                        │                │
-        │    ┌─────────────────┐               │                │
-        │    │ Add Tool        │               │                │
-        │    │ Results to      │               │                │
-        │    │ Conversation    │               │                │
-        │    └────────┬────────┘               │                │
-        │             │                        │                │
-        │             │ (loop back)            │                │
-        └─────────────┘                        │
-                                               ▼
-                                    ┌───────────────────┐
-                                    │ Return            │
-                                    │ AgentResponse     │
-                                    └───────────────────┘
+Skillian uses FastAPI's `Depends` with `@lru_cache` for singleton management:
 
 ```
-
-### Message Flow Example
-
-```
-Iteration 1:
-┌────────────────────────────────────────────────────────────────────────┐
-│ MESSAGES TO LLM                                                         │
-├────────────────────────────────────────────────────────────────────────┤
-│ [SYSTEM] You are Skillian, an AI assistant specialized in SAP BW...    │
-│ [USER] What is the budget for CC-1001?                                 │
-└────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ LLM RESPONSE                                                            │
-├────────────────────────────────────────────────────────────────────────┤
-│ tool_calls: [                                                           │
-│   { name: "get_cost_center", args: { cost_center_id: "CC-1001" } }     │
-│ ]                                                                       │
-└────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-                          Execute get_cost_center
-                                    │
-                                    ▼
-Iteration 2:
-┌────────────────────────────────────────────────────────────────────────┐
-│ MESSAGES TO LLM                                                         │
-├────────────────────────────────────────────────────────────────────────┤
-│ [SYSTEM] You are Skillian...                                           │
-│ [USER] What is the budget for CC-1001?                                 │
-│ [ASSISTANT] (tool_calls: get_cost_center)                              │
-│ [TOOL] { "cost_center_id": "CC-1001", "budget": 150000, ... }          │
-└────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ LLM RESPONSE                                                            │
-├────────────────────────────────────────────────────────────────────────┤
-│ content: "Cost center CC-1001 has a budget of $150,000 for fiscal      │
-│           year 2024. Current spending is at $45,230..."                │
-│ tool_calls: []  (empty - no more tools needed)                         │
-└────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-                         Return Final Response
-```
-
----
-
-## Tool Execution Algorithm
-
-When the LLM decides to call a tool:
-
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                      TOOL EXECUTION ALGORITHM                             │
-└──────────────────────────────────────────────────────────────────────────┘
-
-              Tool Call: { name: "get_cost_center",
-                           args: { cost_center_id: "CC-1001" } }
-                                      │
-                                      ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│ STEP 1: REGISTRY LOOKUP                                                  │
-│                                                                          │
-│   registry.get_tool("get_cost_center")                                  │
-│                                                                          │
-│   ┌─────────────────┐                                                   │
-│   │  tool_index     │                                                   │
-│   │  ─────────────  │                                                   │
-│   │  "get_cost_     │───▶ "financial" (skill name)                      │
-│   │   center"       │                                                   │
-│   └─────────────────┘                                                   │
-│            │                                                             │
-│            ▼                                                             │
-│   ┌─────────────────┐                                                   │
-│   │  skills         │                                                   │
-│   │  ─────────────  │                                                   │
-│   │  "financial"    │───▶ FinancialSkill instance                       │
-│   └─────────────────┘                                                   │
-│            │                                                             │
-│            ▼                                                             │
-│   skill.get_tool("get_cost_center") → Tool instance                     │
-│                                                                          │
-└────────────────────────────────────┬────────────────────────────────────┘
-                                     │
-                                     ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│ STEP 2: INPUT VALIDATION (Pydantic)                                      │
-│                                                                          │
-│   ┌─────────────────────────────────────────┐                           │
-│   │  GetCostCenterInput.model_validate({    │                           │
-│   │    "cost_center_id": "CC-1001"          │                           │
-│   │  })                                      │                           │
-│   └─────────────────────────────────────────┘                           │
-│                         │                                                │
-│           ┌─────────────┴─────────────┐                                 │
-│           │                           │                                 │
-│        VALID                       INVALID                              │
-│           │                           │                                 │
-│           ▼                           ▼                                 │
-│   Continue               Return validation error                        │
-│                                                                          │
-└────────────────────────────────────┬────────────────────────────────────┘
-                                     │
-                                     ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│ STEP 3: FUNCTION EXECUTION                                               │
-│                                                                          │
-│   tool.function(cost_center_id="CC-1001", fiscal_year=2024)             │
-│                        │                                                 │
-│                        ▼                                                 │
-│   ┌─────────────────────────────────────────┐                           │
-│   │  connector.execute_query(               │                           │
-│   │    query_type="cost_center",            │                           │
-│   │    parameters={                         │                           │
-│   │      "cost_center_id": "CC-1001",       │                           │
-│   │      "fiscal_year": 2024                │                           │
-│   │    }                                     │                           │
-│   │  )                                       │                           │
-│   └─────────────────────────────────────────┘                           │
-│                        │                                                 │
-│                        ▼                                                 │
-│   ┌─────────────────────────────────────────┐                           │
-│   │  RESULT:                                │                           │
-│   │  {                                      │                           │
-│   │    "cost_center_id": "CC-1001",         │                           │
-│   │    "name": "Marketing",                 │                           │
-│   │    "budget": 150000,                    │                           │
-│   │    "actuals": 45230,                    │                           │
-│   │    "variance": 104770                   │                           │
-│   │  }                                      │                           │
-│   └─────────────────────────────────────────┘                           │
-│                                                                          │
-└────────────────────────────────────┬────────────────────────────────────┘
-                                     │
-                                     ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│ STEP 4: RETURN RESULT                                                    │
-│                                                                          │
-│   JSON string result added to conversation as ToolMessage               │
-│                                                                          │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Skill Registry & Routing
-
-The registry manages all skills and provides tool routing:
-
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                        SKILL REGISTRY                                     │
-└──────────────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                          │
-│   _skills: dict[str, Skill]                                             │
-│   ┌─────────────────────────────────────────────────────────────────┐  │
-│   │  "financial"  →  FinancialSkill                                  │  │
-│   │  "sales"      →  SalesSkill                                      │  │
-│   │  "inventory"  →  InventorySkill                                  │  │
-│   └─────────────────────────────────────────────────────────────────┘  │
-│                                                                          │
-│   _tool_index: dict[str, str]                                           │
-│   ┌─────────────────────────────────────────────────────────────────┐  │
-│   │  "get_cost_center"     →  "financial"                            │  │
-│   │  "list_cost_centers"   →  "financial"                            │  │
-│   │  "compare_budget"      →  "financial"                            │  │
-│   │  "get_sales_order"     →  "sales"                                │  │
-│   │  "check_inventory"     →  "inventory"                            │  │
-│   └─────────────────────────────────────────────────────────────────┘  │
-│                                                                          │
+│                     DEPENDENCY GRAPH                                     │
 └─────────────────────────────────────────────────────────────────────────┘
 
-REGISTRATION ALGORITHM:
+                         get_settings()
+                              │
+              ┌───────────────┼───────────────┐
+              │               │               │
+              ▼               ▼               ▼
+    get_llm_provider()  get_source_registry()  get_postgres_connector()
+              │               │                        │
+              │               │               ┌────────┴────────┐
+              ▼               ▼               ▼                 ▼
+    get_chat_model()    get_query_engine()  get_comparison_engine()
+              │               │                        │
+              │               └────────────┬───────────┘
+              │                            │
+              │                            ▼
+              │                   get_data_analyst_skill()
+              │                            │
+              │                            ▼
+              │                   get_skill_registry()
+              │                            │
+              └────────────────────────────┤
+                                           ▼
+                                     get_agent()
+                                           │
+                                           ▼
+                                   Route Handler
+```
 
-    register(skill)
-         │
-         ▼
-┌─────────────────┐     ┌─────────────────┐
-│ Skill name      │ NO  │ Raise           │
-│ already exists? │────▶│ DuplicateSkill  │
-└────────┬────────┘     │ Error           │
-         │ YES          └─────────────────┘
-         ▼
-┌─────────────────┐
-│ For each tool   │
-│ in skill.tools: │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐     ┌─────────────────┐
-│ Tool name       │ NO  │ Raise           │
-│ already exists? │────▶│ DuplicateTool   │
-└────────┬────────┘     │ Error           │
-         │ YES          └─────────────────┘
-         ▼
-┌─────────────────┐
-│ Add to _skills  │
-│ Add to _tool_   │
-│ index           │
-└─────────────────┘
+### Key Dependencies
 
+```python
+# app/dependencies.py
 
-TOOL LOOKUP ALGORITHM:
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
 
-    get_tool(tool_name)
-         │
-         ▼
-┌─────────────────┐
-│ skill_name =    │
-│ _tool_index     │
-│ [tool_name]     │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ skill =         │
-│ _skills         │
-│ [skill_name]    │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ return skill.   │
-│ get_tool(       │
-│   tool_name)    │
-└─────────────────┘
+@lru_cache
+def get_llm_provider() -> LLMProvider:
+    settings = get_settings()
+    return create_llm_provider(settings)
+
+@lru_cache
+def get_skill_registry() -> SkillRegistry:
+    registry = SkillRegistry()
+    registry.register(get_data_analyst_skill())
+    return registry
+
+def get_agent() -> Agent:  # Not cached - fresh per request
+    return Agent(
+        chat_model=get_chat_model(),
+        registry=get_skill_registry()
+    )
 ```
 
 ---
 
-## LLM Provider Abstraction
+## Key Design Patterns
 
-The factory pattern allows swapping LLM providers:
+### 1. Protocol-Based Duck Typing
 
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                      LLM PROVIDER FACTORY                                 │
-└──────────────────────────────────────────────────────────────────────────┘
+Skills and LLM providers use `Protocol` (not ABC) for flexibility:
 
-                    Settings.llm_provider
-                           │
-                           ▼
-              ┌────────────────────────┐
-              │  create_llm_provider   │
-              │      (factory)         │
-              └───────────┬────────────┘
-                          │
-          ┌───────────────┼───────────────┐
-          │               │               │
-       "ollama"      "anthropic"      "openai"
-          │               │               │
-          ▼               ▼               ▼
-┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
-│ OllamaProvider  │ │ AnthropicProv.  │ │ OpenAIProvider  │
-│                 │ │                 │ │                 │
-│ • ChatOllama    │ │ • ChatAnthropic │ │ • ChatOpenAI    │
-│ • Local LLM     │ │ • Claude API    │ │ • GPT-4 API     │
-│ • llama3.2      │ │ • claude-3-5-   │ │ • gpt-4o        │
-│                 │ │   sonnet        │ │                 │
-└────────┬────────┘ └────────┬────────┘ └────────┬────────┘
-         │                   │                   │
-         └───────────────────┼───────────────────┘
-                             │
-                             ▼
-                  ┌─────────────────────┐
-                  │  LLMProvider        │
-                  │  Protocol           │
-                  │  ─────────────────  │
-                  │  get_chat_model()   │
-                  │  model_name         │
-                  │  provider_name      │
-                  └─────────────────────┘
-                             │
-                             ▼
-                  ┌─────────────────────┐
-                  │  LangChain          │
-                  │  BaseChatModel      │
-                  │  (with tools bound) │
-                  └─────────────────────┘
+```python
+from typing import Protocol, runtime_checkable
+
+@runtime_checkable
+class Skill(Protocol):
+    @property
+    def name(self) -> str: ...
+    @property
+    def tools(self) -> list[Tool]: ...
+    @property
+    def system_prompt(self) -> str: ...
 ```
 
----
+### 2. Factory Pattern
 
-## Connector Pattern
+LLM provider selection based on configuration:
 
-Connectors abstract SAP BW data access:
-
+```python
+def create_llm_provider(settings: Settings) -> LLMProvider:
+    match settings.llm_provider:
+        case "anthropic":
+            return AnthropicProvider(settings.anthropic_api_key)
+        case "ollama":
+            return OllamaProvider(settings.ollama_base_url)
+        case "openai":
+            return OpenAIProvider(settings.openai_api_key)
 ```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                      CONNECTOR PATTERN                                    │
-└──────────────────────────────────────────────────────────────────────────┘
 
-                         Connector Protocol
-                               │
-            ┌──────────────────┼──────────────────┐
-            │                  │                  │
-            ▼                  ▼                  ▼
-    ┌───────────────┐  ┌───────────────┐  ┌───────────────┐
-    │ MockConnector │  │ HANAConnector │  │ RFCConnector  │
-    │  (Dev/Test)   │  │  (Direct DB)  │  │ (Legacy SAP)  │
-    └───────┬───────┘  └───────────────┘  └───────────────┘
-            │
-            ▼
-    ┌───────────────────────────────────────────────────────┐
-    │                    MockConnector                       │
-    │                                                        │
-    │   Sample Data:                                         │
-    │   ┌─────────────────────────────────────────────────┐ │
-    │   │ COST_CENTERS = {                                │ │
-    │   │   "CC-1001": {                                  │ │
-    │   │     "name": "Marketing",                        │ │
-    │   │     "budget": 150000,                           │ │
-    │   │     "actuals": 45230,                           │ │
-    │   │     ...                                         │ │
-    │   │   }                                             │ │
-    │   │ }                                               │ │
-    │   └─────────────────────────────────────────────────┘ │
-    │                                                        │
-    │   execute_query(query_type, parameters)               │
-    │        │                                               │
-    │        ▼                                               │
-    │   ┌─────────────────────────────────────┐             │
-    │   │ match query_type:                   │             │
-    │   │   "cost_center" → _get_cost_center  │             │
-    │   │   "cost_center_list" → _list_...    │             │
-    │   │   "profit_center" → _get_profit...  │             │
-    │   │   "transactions" → _search_trans... │             │
-    │   └─────────────────────────────────────┘             │
-    │                                                        │
-    └───────────────────────────────────────────────────────┘
+### 3. Tool Binding
 
+Tools are converted to LangChain format and bound to the chat model:
 
-QUERY EXECUTION FLOW:
+```python
+# In Agent.__init__
+langchain_tools = [
+    tool.to_langchain_tool()
+    for tool in registry.get_all_tools()
+]
+self.model = chat_model.bind_tools(langchain_tools)
+```
 
-    Tool Function
-         │
-         │  connector.execute_query(
-         │    "cost_center",
-         │    {"cost_center_id": "CC-1001"}
-         │  )
-         │
-         ▼
-    ┌─────────────────┐
-    │ Query Type      │
-    │ Router          │
-    └────────┬────────┘
-             │
-             ▼
-    ┌─────────────────┐
-    │ _get_cost_      │
-    │ center()        │
-    └────────┬────────┘
-             │
-             ▼
-    ┌─────────────────┐
-    │ Lookup in       │
-    │ COST_CENTERS    │
-    │ dict            │
-    └────────┬────────┘
-             │
-             ▼
-    ┌─────────────────────────────────┐
-    │ Return:                         │
-    │ {                               │
-    │   "cost_center_id": "CC-1001",  │
-    │   "name": "Marketing",          │
-    │   "budget": 150000,             │
-    │   ...                           │
-    │ }                               │
-    └─────────────────────────────────┘
+### 4. Conversation State
+
+Messages are tracked with proper role separation:
+
+```python
+class Conversation:
+    messages: list[Message]
+
+    def add_user(self, content: str)
+    def add_assistant(self, content: str, tool_calls: list | None)
+    def add_tool_result(self, content: str, tool_call_id: str)
 ```
 
 ---
 
-## Component Interactions
+## Configuration
 
-Complete sequence diagram for a user query:
+### Environment Variables
 
+```bash
+# .env
+ENV=development
+DEBUG=true
+
+# LLM Provider
+LLM_PROVIDER=ollama              # ollama | anthropic | openai
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=llama3.2
+ANTHROPIC_API_KEY=sk-...         # for production
+
+# Databases
+DATABASE_URL=postgresql+asyncpg://skillian:skillian@localhost:5432/skillian
+BUSINESS_DATABASE_URL=postgresql://skillian:skillian@localhost:5432/skillian
 ```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                    COMPLETE INTERACTION SEQUENCE                          │
-└──────────────────────────────────────────────────────────────────────────┘
 
-   User        FastAPI       Agent      Registry    LLM       Tool     Connector
-    │            │             │           │         │          │          │
-    │  POST /chat│             │           │         │          │          │
-    │ ──────────>│             │           │         │          │          │
-    │            │             │           │         │          │          │
-    │            │ process()   │           │         │          │          │
-    │            │────────────>│           │         │          │          │
-    │            │             │           │         │          │          │
-    │            │             │ get_all_  │         │          │          │
-    │            │             │ tools()   │         │          │          │
-    │            │             │──────────>│         │          │          │
-    │            │             │<──────────│         │          │          │
-    │            │             │           │         │          │          │
-    │            │             │ bind_tools│         │          │          │
-    │            │             │ & invoke  │         │          │          │
-    │            │             │──────────────────-->│          │          │
-    │            │             │                     │          │          │
-    │            │             │   tool_calls:       │          │          │
-    │            │             │   get_cost_center   │          │          │
-    │            │             │<────────────────────│          │          │
-    │            │             │           │         │          │          │
-    │            │             │ get_tool()│         │          │          │
-    │            │             │──────────>│         │          │          │
-    │            │             │<──────────│         │          │          │
-    │            │             │           │         │          │          │
-    │            │             │ execute() │         │          │          │
-    │            │             │─────────────────────────────-->│          │
-    │            │             │           │         │          │          │
-    │            │             │           │         │          │execute_  │
-    │            │             │           │         │          │query()   │
-    │            │             │           │         │          │─────────>│
-    │            │             │           │         │          │<─────────│
-    │            │             │           │         │          │          │
-    │            │             │  result   │         │          │          │
-    │            │             │<───────────────────────────────│          │
-    │            │             │           │         │          │          │
-    │            │             │ invoke    │         │          │          │
-    │            │             │ (with tool result)  │          │          │
-    │            │             │──────────────────-->│          │          │
-    │            │             │                     │          │          │
-    │            │             │   final response    │          │          │
-    │            │             │<────────────────────│          │          │
-    │            │             │           │         │          │          │
-    │            │ AgentResp.  │           │         │          │          │
-    │            │<────────────│           │         │          │          │
-    │            │             │           │         │          │          │
-    │  ChatResp. │             │           │         │          │          │
-    │<───────────│             │           │         │          │          │
-    │            │             │           │         │          │          │
+### Source Configuration (`config/sources.yaml`)
+
+```yaml
+sources:
+  fi_reporting:
+    description: "Financial transactions - source of truth"
+    table: fi_reporting
+    dimensions:
+      company: { column: compcode }
+      period: { column: fiscper }
+      account: { column: gl_acct }
+    measures:
+      amount: { column: cs_trn_lc, aggregation: sum }
+    defaults:
+      dimensions: [company, period]
+
+comparison:
+  default_align_on: [company, period]
+  thresholds:
+    match: { absolute: 1000, percentage: 1.0 }
+    minor_diff: { absolute: 5000, percentage: 5.0 }
+  cache_ttl_seconds: 3600
 ```
 
 ---
 
-## Error Handling
+## Adding New Components
 
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                        ERROR HANDLING FLOW                                │
-└──────────────────────────────────────────────────────────────────────────┘
+### Adding a New Skill
 
-                    Tool Execution
-                         │
-          ┌──────────────┼──────────────┐
-          │              │              │
-    Pydantic        Connector       Runtime
-    Validation       Error          Error
-          │              │              │
-          ▼              ▼              ▼
-┌─────────────────────────────────────────────────────────┐
-│                                                          │
-│   All errors are caught and returned as JSON:           │
-│                                                          │
-│   {                                                      │
-│     "error": true,                                       │
-│     "message": "Validation error: cost_center_id        │
-│                 is required"                             │
-│   }                                                      │
-│                                                          │
-└────────────────────────────┬────────────────────────────┘
-                             │
-                             ▼
-┌─────────────────────────────────────────────────────────┐
-│                                                          │
-│   Error JSON added to conversation as ToolMessage       │
-│   LLM sees error and can:                               │
-│     • Retry with corrected parameters                   │
-│     • Inform user of the issue                          │
-│     • Try alternative approach                          │
-│                                                          │
-└─────────────────────────────────────────────────────────┘
-```
+1. Create directory structure:
+   ```
+   app/skills/{domain}/
+   ├── __init__.py
+   ├── skill.py          # Skill class
+   ├── tools.py          # Tool functions + schemas
+   └── knowledge/        # RAG documents
+       └── guide.md
+   ```
 
----
+2. Define tool input schemas:
+   ```python
+   class MyToolInput(BaseModel):
+       param: str = Field(description="Parameter description")
+       optional: int | None = Field(default=None)
+   ```
 
-## Adding a New Skill
+3. Implement skill class:
+   ```python
+   class DomainSkill:
+       @property
+       def name(self) -> str:
+           return "domain"
 
-Step-by-step algorithm for extending Skillian:
+       @property
+       def tools(self) -> list[Tool]:
+           return [...]
 
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                      ADD NEW SKILL ALGORITHM                              │
-└──────────────────────────────────────────────────────────────────────────┘
+       @property
+       def system_prompt(self) -> str:
+           return "You are an expert in..."
+   ```
 
-STEP 1: Create Directory Structure
-─────────────────────────────────────
-    app/skills/{domain}/
-    ├── __init__.py
-    ├── skill.py          # Skill class
-    ├── tools.py          # Tool functions + schemas
-    └── knowledge/        # RAG documents
-        └── guide.md
+4. Register in `app/dependencies.py`:
+   ```python
+   registry.register(DomainSkill(...))
+   ```
 
+### Adding a New LLM Provider
 
-STEP 2: Define Tool Input Schemas
-─────────────────────────────────────
-    class MyToolInput(BaseModel):
-        param: str = Field(description="...")
-        optional: int | None = Field(default=None)
+1. Implement the protocol in `app/llm/{provider}.py`:
+   ```python
+   class NewProvider:
+       def get_chat_model(self) -> BaseChatModel:
+           return ChatNewProvider(...)
 
+       @property
+       def model_name(self) -> str:
+           return "model-name"
 
-STEP 3: Implement Tool Functions
-─────────────────────────────────────
-    async def my_tool(
-        connector: Connector,
-        param: str,
-        optional: int | None = None
-    ) -> dict:
-        result = await connector.execute_query(
-            "query_type",
-            {"param": param}
-        )
-        return result
+       @property
+       def provider_name(self) -> str:
+           return "new_provider"
+   ```
 
+2. Add to factory in `app/llm/factory.py`:
+   ```python
+   case "new_provider":
+       return NewProvider(settings.new_api_key)
+   ```
 
-STEP 4: Create Skill Class
-─────────────────────────────────────
-    class DomainSkill(BaseSkill):
-        def __init__(self, connector: Connector):
-            self._connector = connector
-            self._tools = [
-                Tool(
-                    name="my_tool",
-                    description="...",
-                    function=partial(my_tool, connector),
-                    input_schema=MyToolInput
-                )
-            ]
+### Adding a New Data Source
 
-        @property
-        def name(self) -> str:
-            return "domain"
-
-        @property
-        def description(self) -> str:
-            return "Domain-specific analysis..."
-
-        @property
-        def system_prompt(self) -> str:
-            return "You are an expert in..."
-
-        @property
-        def tools(self) -> list[Tool]:
-            return self._tools
-
-
-STEP 5: Register in Dependencies
-─────────────────────────────────────
-    # app/dependencies.py
-
-    from app.skills.domain.skill import DomainSkill
-
-    @lru_cache
-    def get_skill_registry() -> SkillRegistry:
-        connector = get_connector()
-        registry = SkillRegistry()
-        registry.register(FinancialSkill(connector))
-        registry.register(DomainSkill(connector))  # NEW
-        return registry
-
-
-STEP 6: Add Connector Support (if needed)
-─────────────────────────────────────
-    # app/connectors/mock.py
-
-    async def execute_query(self, query_type: str, ...):
-        match query_type:
-            case "new_query_type":
-                return self._handle_new_query(parameters)
+Add to `config/sources.yaml`:
+```yaml
+sources:
+  new_source:
+    description: "Description for LLM"
+    table: actual_table_name
+    dimensions:
+      logical_name: { column: actual_column }
+    measures:
+      metric: { column: value_column, aggregation: sum }
 ```
 
 ---
 
-## Summary
+## Related Documentation
 
-Skillian implements a **modular, protocol-based architecture** with these key algorithms:
-
-| Algorithm | Purpose | Key Files |
-|-----------|---------|-----------|
-| **Request Flow** | Route user messages through the system | `main.py`, `api/routes.py` |
-| **Agent Loop** | ReAct-style reasoning with tool execution | `core/agent.py` |
-| **Tool Execution** | Validate inputs, execute, return results | `core/tool.py` |
-| **Registry Routing** | Map tool names to skills efficiently | `core/registry.py` |
-| **LLM Factory** | Abstract LLM provider selection | `llm/factory.py` |
-| **Connector Pattern** | Abstract data access layer | `connectors/` |
-
-The system is designed for extensibility - adding new skills, tools, LLM providers, or connectors follows well-defined patterns without modifying core logic.
+- [AGENT_LOOP.md](./AGENT_LOOP.md) - How the AI reasoning loop works
+- [COMPARISON_ENGINE.md](./COMPARISON_ENGINE.md) - Data comparison algorithm details
+- [DATA_COMPARISON_FRAMEWORK.md](./DATA_COMPARISON_FRAMEWORK.md) - Comparison framework overview
