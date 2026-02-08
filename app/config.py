@@ -57,15 +57,15 @@ class Settings(BaseSettings):
     # Business Database (SAP BW data)
     business_database_url: str = "postgresql://business:business@localhost:5433/business_db"
 
-    # SAP Datasphere
+    # SAP Datasphere (hdbcli)
     datasphere_host: str | None = None
     datasphere_port: int = 443
-    datasphere_space: str | None = None
-    datasphere_client_id: str | None = None
-    datasphere_client_secret: str | None = None
-    datasphere_token_url: str | None = None
+    datasphere_user: str | None = None
+    datasphere_password: str | None = None
+    datasphere_encrypt: bool = True
+    datasphere_ssl_validate_certificate: bool = True
     datasphere_timeout: int = 60
-    datasphere_max_connections: int = 10
+    datasphere_pool_size: int = 4
 
     @property
     def is_development(self) -> bool:
@@ -96,13 +96,12 @@ class Settings(BaseSettings):
     def validate_datasphere_config(self) -> Self:
         """Validate Datasphere config when connector is needed."""
         if self.datasphere_host and not all([
-            self.datasphere_client_id,
-            self.datasphere_client_secret,
-            self.datasphere_token_url,
+            self.datasphere_user,
+            self.datasphere_password,
         ]):
             raise ValueError(
-                "DATASPHERE_CLIENT_ID, DATASPHERE_CLIENT_SECRET, and "
-                "DATASPHERE_TOKEN_URL are required when DATASPHERE_HOST is set"
+                "DATASPHERE_USER and DATASPHERE_PASSWORD are required "
+                "when DATASPHERE_HOST is set"
             )
         return self
 
