@@ -1,0 +1,50 @@
+tools:
+  - name: list_investigation_sources
+    description: |
+      List all configured investigation sources (reports, tables, versions).
+
+      Returns information about each configured data source including:
+      - Report names and descriptions
+      - Version codes and names with their backing tables
+      - Available check dimensions and their aliases
+      - Standalone tables available for investigation
+
+      Use this tool first to understand what sources can be checked
+      for data availability.
+    parameters: []
+    implementation: app.skills.data_availability.tools:list_investigation_sources
+
+  - name: check_data_availability
+    description: |
+      Check if data exists in a Datasphere table for given filter criteria.
+
+      Executes a SQL query against the configured Datasphere table,
+      grouping by standard investigation dimensions (company code,
+      version, period, scope) and applying the specified filters.
+
+      Returns:
+      - Whether any data was found
+      - Grouped results showing which dimension combinations have data
+      - Row counts per group
+
+      Use this to verify data presence before branching investigation logic.
+    parameters:
+      - name: table
+        type: string
+        required: true
+        description: >
+          Datasphere table name to check (e.g. 'CV_ZBC_AA61').
+          Use list_investigation_sources to see available tables.
+      - name: filters
+        type: object
+        required: false
+        description: >
+          Filter conditions as column:value pairs. Use actual Datasphere
+          column names (e.g. {"/BIC/ZCOMPCODE": "1110", "FISCPER": "2024012"}).
+      - name: group_by
+        type: array
+        required: false
+        description: >
+          Columns to group results by. Defaults to standard investigation
+          dimensions from the config for the given table.
+    implementation: app.skills.data_availability.tools:check_data_availability
