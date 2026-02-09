@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     # SAP Datasphere (hdbcli)
     datasphere_host: str | None = None
     datasphere_port: int = 443
+    datasphere_space: str = "BW2AI"
     datasphere_user: str | None = None
     datasphere_password: str | None = None
     datasphere_encrypt: bool = True

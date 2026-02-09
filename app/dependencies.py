@@ -47,13 +47,13 @@ def get_datasphere_connector() -> DatasphereConnector | None:
 
     return DatasphereConnector(
         host=settings.datasphere_host,
-        space=settings.datasphere_space,
-        client_id=settings.datasphere_client_id,
-        client_secret=settings.datasphere_client_secret,
-        token_url=settings.datasphere_token_url,
+        user=settings.datasphere_user,
+        password=settings.datasphere_password,
         port=settings.datasphere_port,
+        encrypt=settings.datasphere_encrypt,
+        ssl_validate_certificate=settings.datasphere_ssl_validate_certificate,
         timeout=settings.datasphere_timeout,
-        max_connections=settings.datasphere_max_connections,
+        pool_size=settings.datasphere_pool_size,
     )
 
 

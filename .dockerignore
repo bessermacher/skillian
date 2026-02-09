@@ -27,6 +27,8 @@ tests
 docs
 *.md
 !README.md
+!app/skills/**/SKILL.md
+!app/skills/**/knowledge/*.md
 
 # Build artifacts
 dist

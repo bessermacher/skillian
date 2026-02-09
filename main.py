@@ -56,7 +56,7 @@ async def lifespan(app: FastAPI):
     if datasphere:
         try:
             await datasphere.connect()
-            logger.info("Datasphere connector initialized for space: %s", datasphere.space)
+            logger.info("Datasphere connector initialized for space: %s", settings.datasphere_space)
         except Exception as e:
             logger.warning("Datasphere initialization failed: %s", e)
 
