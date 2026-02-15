@@ -91,8 +91,8 @@ class TestSourceConfig:
 
     def test_tables_loaded(self):
         config = load_investigation_config(Path("config/investigation_sources.yaml"))
-        assert "bpc_consolidation" in config.tables
-        assert config.tables["bpc_consolidation"].table == "CV_ZBC_AA01P"
+        assert "bpc_mart" in config.tables
+        assert config.tables["bpc_mart"].table == "CV_ZFI_AA01"
 
     def test_scope_values_loaded(self):
         config = load_investigation_config(Path("config/investigation_sources.yaml"))
@@ -109,9 +109,9 @@ class TestSourceConfig:
 
     def test_get_table_info_from_tables(self):
         config = load_investigation_config(Path("config/investigation_sources.yaml"))
-        info = config.get_table_info("CV_ZBC_AA01P")
+        info = config.get_table_info("CV_ZFI_AA01")
         assert info is not None
-        assert info["source_name"] == "bpc_consolidation"
+        assert info["source_name"] == "bpc_mart"
         assert info["source_type"] == "table"
 
     def test_get_table_info_not_found(self):
@@ -124,7 +124,7 @@ class TestSourceConfig:
         tables = config.get_all_table_names()
         assert "CV_ZBC_AA61" in tables
         assert "CV_ZBC_AA62" in tables
-        assert "CV_ZBC_AA01P" in tables
+        assert "CV_ZFI_AA01" in tables
         assert "CV_ZBC_AA08Z" in tables
 
     def test_missing_config_file(self):
