@@ -66,9 +66,9 @@ January = 001, February = 002, ..., December = 012.
 
 ---
 
-### Playbook: Missing Data in Consolidation Management Report
+### Playbook: Missing Data in Consolidated Management PnL Report
 
-**Trigger:** User reports missing data in the Consolidation Management report for a specific
+**Trigger:** User reports missing data in the Consolidated Management PnL report for a specific
 company code, period, and/or version.
 
 **Before starting:** Gather from the user:
@@ -103,17 +103,20 @@ company code, period, and/or version.
 - **Ownership not found (result: False):** Company was removed from scope for this period.
   Recommend: Check with consolidation team whether this is intentional.
 
-**Step 2B: Check BPC Consolidation Engine**
-- Check the upstream BPC consolidation engine table `CV_ZBC_AA01P`.
-- Use `check_data_availability` with table `CV_ZBC_AA01P`, same company code and period filters.
+**Step 2B: Check BPC Mart**
+- Check the upstream BPC mart table `CV_ZFI_AA01`.
+- **Note:** `CV_ZFI_AA01` does NOT have `/BIC/ZSCOPE` or `/BIC/ZVERSION` fields.
+  Only filter by company code (`/BIC/ZCOMPCODE`) and fiscal period (`FISCPER`).
+- Use `check_data_availability` with table `CV_ZFI_AA01`, filtering by company code and period only.
+- Group by `/BIC/ZCOMPCODE`, `FISCPER`.
 - Record finding with `record_finding`.
 
 **Step 2B outcomes:**
-- **Data found in BPC engine:** Data exists in consolidation but not in reporting.
+- **Data found in BPC mart:** Data exists in consolidation but not in reporting.
   Possible causes: reporting data load not triggered, data refresh failure.
   Recommend: Trigger reporting refresh or check data load logs.
-- **No data found in BPC engine:** Data is missing from consolidation entirely.
-  The issue is upstream of the consolidation engine.
+- **No data found in BPC mart:** Data is missing from consolidation entirely.
+  The issue is upstream of the BPC mart.
   Recommend: Check source data loads into BPC.
 
 ## Capabilities
@@ -135,7 +138,7 @@ Activate this skill when the user:
 
 ### Example 1: Missing Actual Data
 
-User: "Consolidation Management report has no actual data for CoCd 1110 in December 2024"
-Assistant: Starts investigation, follows the "Missing Data in Consolidation Management Report"
-playbook step by step, checks CV_ZBC_AA61, branches based on findings, checks CV_ZBC_AA01P
+User: "Consolidated Management PnL report has no actual data for CoCd 1110 in December 2024"
+Assistant: Starts investigation, follows the "Missing Data in Consolidated Management PnL Report"
+playbook step by step, checks CV_ZBC_AA61, branches based on findings, checks CV_ZFI_AA01
 or ownership table as needed, presents summary with root cause and recommendation.

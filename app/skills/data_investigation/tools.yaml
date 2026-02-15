@@ -19,7 +19,7 @@ tools:
         type: string
         required: false
         description: >
-          Name of the report with the issue (e.g. "Consolidation Management")
+          Name of the report with the issue (e.g. "Consolidated Management PnL")
       - name: company_code
         type: string
         required: false

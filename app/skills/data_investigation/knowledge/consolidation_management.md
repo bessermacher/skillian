@@ -1,8 +1,8 @@
-# Consolidation Management Report
+# Consolidated Management PnL Report
 
 ## Overview
 
-The Consolidation Management (CM) report is the primary group financial consolidation
+The Consolidated Management PnL (CM) report is the primary group financial consolidation
 report in SAP BPC. It shows consolidated financial data across company codes,
 versions, and scopes.
 
@@ -28,10 +28,17 @@ versions, and scopes.
 Data flows through:
 
 ```
-Source Systems -> BPC Engine (CV_ZBC_AA01P) -> Reporting (CV_ZBC_AA61 / CV_ZBC_AA62)
+Source Systems -> BPC Mart (CV_ZFI_AA01) -> Reporting (CV_ZBC_AA61 / CV_ZBC_AA62)
 ```
 
 If data is missing in the CM report, it could be missing at any point in this pipeline.
+
+**Important:** The BPC mart table (`CV_ZFI_AA01`) is structurally different from the
+Consolidated Management PnL reporting tables (`CV_ZBC_AA61` / `CV_ZBC_AA62`).
+The BPC mart does **not** have `/BIC/ZSCOPE` or `/BIC/ZVERSION` fields — these are
+added during the consolidation process. All data in `CV_ZFI_AA01` is the source
+for `CV_ZBC_AA61`. When checking the BPC mart, only filter by company code and
+fiscal period.
 
 ## Scope Values and Their Meaning
 
@@ -53,5 +60,5 @@ This typically happens when:
 
 ### No data at all in reporting
 When no data exists in the reporting table (CV_ZBC_AA61/62), the data may still
-exist in the BPC consolidation engine table (CV_ZBC_AA01P). If it does, the
+exist in the BPC mart table (CV_ZFI_AA01). If it does, the
 reporting data load likely failed or was not triggered.

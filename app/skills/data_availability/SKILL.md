@@ -55,7 +55,7 @@ Activate this skill when:
 
 ### Example 1: Check Report Data
 
-User: "Is there actual data for company code 1110 in December 2024 in the Consolidation Management report?"
+User: "Is there actual data for company code 1110 in December 2024 in the Consolidated Management PnL report?"
 Assistant: Uses check_data_availability to query CV_ZBC_AA61 with filters for ZCOMPCODE=1110, FISCPER=2024012, ZVERSION=001.
 
 ### Example 2: List Sources

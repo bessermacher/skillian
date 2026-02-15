@@ -94,12 +94,12 @@ class TestStartInvestigation:
     def test_start_with_all_params(self):
         result = investigation_tools.start_investigation(
             problem_description="Missing data",
-            report_name="Consolidation Management",
+            report_name="Consolidated Management PnL",
             company_code="1110",
             fiscal_period="2024012",
         )
 
-        assert result["context"]["report_name"] == "Consolidation Management"
+        assert result["context"]["report_name"] == "Consolidated Management PnL"
         assert result["context"]["company_code"] == "1110"
         assert result["context"]["fiscal_period"] == "2024012"
 
@@ -281,7 +281,7 @@ class TestGetInvestigationSummary:
         # Start
         start_result = investigation_tools.start_investigation(
             problem_description="No actual data for CoCd 1110 in Dec 2024",
-            report_name="Consolidation Management",
+            report_name="Consolidated Management PnL",
             company_code="1110",
             fiscal_period="2024012",
         )
@@ -296,12 +296,12 @@ class TestGetInvestigationSummary:
             status="needs_further_check",
         )
 
-        # Step 2B: Check BPC engine
+        # Step 2B: Check BPC mart
         investigation_tools.record_finding(
-            step_name="Check BPC consolidation engine",
+            step_name="Check BPC mart",
             tool_used="check_data_availability",
-            result_summary="Data found in CV_ZBC_AA01P with 15 rows",
-            conclusion="Data exists in BPC engine but not in reporting. "
+            result_summary="Data found in CV_ZFI_AA01 with 15 rows",
+            conclusion="Data exists in BPC mart but not in reporting. "
             "Reporting data load likely not triggered.",
             status="issue_found",
         )
@@ -314,6 +314,6 @@ class TestGetInvestigationSummary:
         assert summary["context"]["company_code"] == "1110"
         assert summary["context"]["fiscal_period"] == "2024012"
         assert summary["findings"][0]["step_name"] == "Check reporting table"
-        assert summary["findings"][1]["step_name"] == "Check BPC consolidation engine"
+        assert summary["findings"][1]["step_name"] == "Check BPC mart"
         assert summary["findings"][0]["step_number"] == 1
         assert summary["findings"][1]["step_number"] == 2

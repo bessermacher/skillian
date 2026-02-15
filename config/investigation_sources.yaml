@@ -5,7 +5,7 @@ schema: "BW2AI"
 
 reports:
   consolidation_management:
-    description: "Consolidation Management report - group financial consolidation"
+    description: "Consolidated Management PnL report - group financial consolidation"
     versions:
       - code: "001"
         name: "Actual"
@@ -38,23 +38,17 @@ reports:
       - "/BIC/ZSCOPE"
 
 tables:
-  bpc_consolidation:
-    description: "BPC Consolidation engine data (pre-reporting)"
-    table: "CV_ZBC_AA01P"
+  bpc_mart:
+    description: "BPC mart data (pre-reporting) — source for CV_ZBC_AA61. Does not have ZSCOPE or ZVERSION fields."
+    table: "CV_ZFI_AA01"
     check_dimensions:
       - column: "/BIC/ZCOMPCODE"
         aliases: ["company_code", "cocd", "company"]
-      - column: "/BIC/ZVERSION"
-        aliases: ["version", "zversion"]
       - column: "FISCPER"
         aliases: ["fiscal_period", "period", "month"]
-      - column: "/BIC/ZSCOPE"
-        aliases: ["scope", "consolidation_scope", "zscope"]
     default_group_by:
       - "/BIC/ZCOMPCODE"
-      - "/BIC/ZVERSION"
       - "FISCPER"
-      - "/BIC/ZSCOPE"
 
   ownership:
     description: "Company code ownership/scope membership table"
