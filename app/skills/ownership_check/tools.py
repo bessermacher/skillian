@@ -4,24 +4,13 @@ import logging
 import re
 from typing import Any
 
-from app.connectors.datasphere import DatasphereConnector, DatasphereQueryError
+from app.connectors.datasphere import DatasphereQueryError
+from app.skills.common import get_connector
 
 logger = logging.getLogger(__name__)
 
-_connector: DatasphereConnector | None = None
-
 # Pattern for valid parameter values (alphanumeric only — fiscal periods and company codes)
 _VALID_PARAM = re.compile(r"^[a-zA-Z0-9_]+$")
-
-
-def _get_connector(connector: Any) -> DatasphereConnector:
-    """Get or cache the Datasphere connector."""
-    global _connector
-    if connector is not None:
-        _connector = connector
-    if _connector is None:
-        raise ValueError("Datasphere connector not configured")
-    return _connector
 
 
 async def check_ownership(
@@ -30,7 +19,7 @@ async def check_ownership(
     connector: Any = None,
 ) -> dict[str, Any]:
     """Check if a company code is present in the defined scope and fiscal period."""
-    conn = _get_connector(connector)
+    conn = get_connector(connector)
 
     # Validate inputs to prevent SQL injection
     if not _VALID_PARAM.match(param_fiscper):

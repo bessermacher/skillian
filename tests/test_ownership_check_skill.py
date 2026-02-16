@@ -8,6 +8,7 @@ import pytest
 
 from app.connectors.datasphere import DatasphereQueryError
 from app.core.skill_loader import SkillLoader
+from app.skills import common as skills_common
 from app.skills.ownership_check import tools as ownership_tools
 
 logger = logging.getLogger(__name__)
@@ -43,9 +44,9 @@ def skill(skill_loader):
 @pytest.fixture(autouse=True)
 def reset_module_state(mock_connector):
     """Reset module-level state between tests."""
-    ownership_tools._connector = mock_connector
+    skills_common._connector = mock_connector
     yield
-    ownership_tools._connector = None
+    skills_common._connector = None
 
 
 # --- Skill Loading Tests ---
@@ -332,16 +333,16 @@ class TestInputValidation:
 
 class TestGetConnector:
     def test_connector_not_configured(self):
-        ownership_tools._connector = None
+        skills_common._connector = None
 
         with pytest.raises(ValueError, match="Datasphere connector not configured"):
-            ownership_tools._get_connector(None)
+            skills_common.get_connector(None)
 
     def test_connector_passed_directly(self):
         new_connector = MagicMock()
-        result = ownership_tools._get_connector(new_connector)
+        result = skills_common.get_connector(new_connector)
         assert result is new_connector
 
     def test_connector_cached(self, mock_connector):
-        result = ownership_tools._get_connector(None)
+        result = skills_common.get_connector(None)
         assert result is mock_connector

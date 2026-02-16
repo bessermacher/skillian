@@ -52,7 +52,7 @@ class DatasphereConnector:
 
     _connection: dbapi.Connection | None = field(default=None, init=False, repr=False)
     _executor: ThreadPoolExecutor | None = field(default=None, init=False, repr=False)
-    _lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
+
 
     async def connect(self) -> None:
         """Initialize the database connection."""
@@ -93,7 +93,7 @@ class DatasphereConnector:
             self._connection = None
 
         if self._executor:
-            self._executor.shutdown(wait=False)
+            self._executor.shutdown(wait=True)
             self._executor = None
 
     async def execute_sql(
@@ -200,17 +200,18 @@ class DatasphereConnector:
         Returns:
             List of table metadata dictionaries
         """
+        if schema:
+            query = """
+                SELECT TABLE_NAME, TABLE_TYPE, RECORD_COUNT
+                FROM TABLES
+                WHERE SCHEMA_NAME = ?
+            """
+            return await self.execute_sql(query, [schema])
         query = """
             SELECT TABLE_NAME, TABLE_TYPE, RECORD_COUNT
             FROM TABLES
             WHERE SCHEMA_NAME = CURRENT_SCHEMA
         """
-        if schema:
-            query = f"""
-                SELECT TABLE_NAME, TABLE_TYPE, RECORD_COUNT
-                FROM TABLES
-                WHERE SCHEMA_NAME = '{schema}'
-            """
         return await self.execute_sql(query)
 
     async def get_columns(
@@ -225,14 +226,21 @@ class DatasphereConnector:
         Returns:
             List of column metadata dictionaries
         """
-        schema_filter = f"SCHEMA_NAME = '{schema}'" if schema else "SCHEMA_NAME = CURRENT_SCHEMA"
-        query = f"""
+        if schema:
+            query = """
+                SELECT COLUMN_NAME, DATA_TYPE_NAME, LENGTH, IS_NULLABLE, DEFAULT_VALUE
+                FROM TABLE_COLUMNS
+                WHERE SCHEMA_NAME = ? AND TABLE_NAME = ?
+                ORDER BY POSITION
+            """
+            return await self.execute_sql(query, [schema, table_name])
+        query = """
             SELECT COLUMN_NAME, DATA_TYPE_NAME, LENGTH, IS_NULLABLE, DEFAULT_VALUE
             FROM TABLE_COLUMNS
-            WHERE {schema_filter} AND TABLE_NAME = '{table_name}'
+            WHERE SCHEMA_NAME = CURRENT_SCHEMA AND TABLE_NAME = ?
             ORDER BY POSITION
         """
-        return await self.execute_sql(query)
+        return await self.execute_sql(query, [table_name])
 
     async def health_check(self) -> bool:
         """Check if Datasphere connection is healthy."""

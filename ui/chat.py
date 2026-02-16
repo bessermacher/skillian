@@ -159,7 +159,7 @@ if prompt := st.chat_input("Ask about SAP BW data issues..."):
                             tool_calls.append(
                                 {
                                     "tool": tool_name,
-                                    "args": {},
+                                    "args": data.get("args", {}),
                                     "result": result,
                                 }
                             )

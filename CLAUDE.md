@@ -26,7 +26,8 @@ app/
   dependencies.py    # Dependency injection
   llm/               # LLM provider factory (ollama, anthropic, openai, custom_openai)
   rag/               # RAG pipeline (embeddings, vector store, manager)
-  skills/            # Domain skills (data_analyst, datasphere, ownership_check)
+  skills/            # Domain skills (data_availability, data_investigation, ownership_check)
+    common.py        # Shared connector management for all skills
 config/sources.yaml  # Data source definitions (tables, dimensions, measures)
 database/            # SQL init and seed scripts
 ui/chat.py           # Streamlit chat frontend

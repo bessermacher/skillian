@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.core.skill_loader import SkillLoader
+from app.skills import common as skills_common
 from app.skills.data_investigation import tools as investigation_tools
 
 # --- Fixtures ---
@@ -38,10 +39,10 @@ def skill(skill_loader):
 def reset_investigation_state():
     """Reset module-level investigation state between tests."""
     investigation_tools._current_investigation = None
-    investigation_tools._connector = None
+    skills_common._connector = None
     yield
     investigation_tools._current_investigation = None
-    investigation_tools._connector = None
+    skills_common._connector = None
 
 
 # --- Skill Loading Tests ---

@@ -1,6 +1,7 @@
 """Tool definition for skills."""
 
 import logging
+import types
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, get_args, get_origin
@@ -46,7 +47,7 @@ class Tool:
 
             # Unwrap Optional (Union[X, None]) to get the inner type
             origin = get_origin(expected)
-            if origin is type(int | str):  # types.UnionType
+            if origin is types.UnionType:  # e.g. int | str, Optional via X | None
                 inner_types = [t for t in get_args(expected) if t is not type(None)]
                 if len(inner_types) == 1:
                     expected = inner_types[0]
