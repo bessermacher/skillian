@@ -1,13 +1,19 @@
-"""Tests for source registry."""
+"""Tests for source registry.
 
+Note: The data_analyst skill (including SourceRegistry) was archived to
+archive-temp/. These tests are skipped until the module is restored or
+the tests are rewritten against the replacement.
+"""
 
 import pytest
 import yaml
 
-from app.skills.data_analyst.source_registry import (
-    SourceNotFoundError,
-    SourceRegistry,
+source_registry = pytest.importorskip(
+    "app.skills.data_analyst.source_registry",
+    reason="data_analyst skill archived — SourceRegistry no longer in app/",
 )
+SourceRegistry = source_registry.SourceRegistry
+SourceNotFoundError = source_registry.SourceNotFoundError
 
 
 @pytest.fixture

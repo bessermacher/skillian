@@ -89,33 +89,59 @@ class TestStartInvestigation:
         assert result["status"] == "started"
         assert "investigation_id" in result
         assert result["investigation_id"].startswith("inv_")
-        assert result["problem_description"] == "No actual data for CoCd 1110 in Dec 2024"
 
-    def test_start_with_all_params(self):
+    def test_start_returns_next_step(self):
         result = investigation_tools.start_investigation(
             problem_description="Missing data",
-            report_name="Consolidated Management PnL",
+            company_code="1110",
+            fiscal_period="2024012",
+            version="001",
+        )
+
+        assert result["next_step"]["table"] == "CV_ZBC_AA61"
+        assert result["next_step"]["filters"]["ZCOMPCODE"] == "1110"
+        assert result["next_step"]["filters"]["FISCPER"] == "2024012"
+
+    def test_start_forecast_version_uses_aa62(self):
+        result = investigation_tools.start_investigation(
+            problem_description="Missing forecast data",
+            company_code="2200",
+            fiscal_period="2025006",
+            version="021",
+        )
+
+        assert result["next_step"]["table"] == "CV_ZBC_AA62"
+
+    def test_start_defaults_to_version_001(self):
+        result = investigation_tools.start_investigation(
+            problem_description="Missing data",
             company_code="1110",
             fiscal_period="2024012",
         )
 
-        assert result["context"]["report_name"] == "Consolidated Management PnL"
-        assert result["context"]["company_code"] == "1110"
-        assert result["context"]["fiscal_period"] == "2024012"
+        assert result["next_step"]["table"] == "CV_ZBC_AA61"
 
-    def test_start_replaces_previous(self):
+    def test_start_blocks_when_investigation_in_progress(self):
         result1 = investigation_tools.start_investigation(
             problem_description="First investigation",
+            company_code="1110",
+            fiscal_period="2024012",
         )
+        assert result1["status"] == "started"
+
+        # Second call should be blocked
         result2 = investigation_tools.start_investigation(
             problem_description="Second investigation",
         )
+        assert "error" in result2
+        assert result2["investigation_id"] == result1["investigation_id"]
+        assert "check_data_availability" in result2["instruction"]
+        assert result2["next_step"]["table"] == "CV_ZBC_AA61"
+        assert result2["next_step"]["filters"]["ZCOMPCODE"] == "1110"
 
-        assert result1["investigation_id"] != result2["investigation_id"]
-
-        # Current investigation should be the second one
+        # Current investigation should still be the first one
         summary = investigation_tools.get_investigation_summary()
-        assert summary["problem_description"] == "Second investigation"
+        assert summary["problem_description"] == "First investigation"
 
     def test_start_with_connector(self, mock_connector):
         result = investigation_tools.start_investigation(

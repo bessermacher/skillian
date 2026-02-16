@@ -1,10 +1,13 @@
 """Tool implementations for data_availability skill."""
 
+import logging
 import re
 from pathlib import Path
 from typing import Any
 
 from app.connectors.datasphere import DatasphereConnector, DatasphereQueryError
+
+logger = logging.getLogger(__name__)
 
 # Module-level connector cache
 _connector: DatasphereConnector | None = None
@@ -61,6 +64,9 @@ def list_investigation_sources(connector: Any = None) -> dict[str, Any]:
                     {"column": d.column, "aliases": d.aliases} for d in report.check_dimensions
                 ],
                 "default_group_by": report.default_group_by,
+                "measures": [
+                    {"column": m.column, "aggregation": m.aggregation} for m in report.measures
+                ],
             }
         )
 
@@ -75,6 +81,9 @@ def list_investigation_sources(connector: Any = None) -> dict[str, Any]:
                     {"column": d.column, "aliases": d.aliases} for d in table_cfg.check_dimensions
                 ],
                 "default_group_by": table_cfg.default_group_by,
+                "measures": [
+                    {"column": m.column, "aggregation": m.aggregation} for m in table_cfg.measures
+                ],
             }
         )
 
@@ -96,17 +105,39 @@ async def check_data_availability(
     conn = _get_connector(connector)
     config = _get_source_config()
 
+    # Validate filters format — must be a flat dict of {column: value} pairs.
+    # Reject array/nested formats that some LLMs produce.
+    if filters is not None and not isinstance(filters, dict):
+        return {
+            "error": (
+                "Invalid filters format. Filters must be a flat object with "
+                'column:value pairs, e.g. {"ZCOMPCODE": "1110", "FISCPER": "2026001"}. '
+                "Do NOT use arrays or nested objects."
+            ),
+            "data_found": False,
+        }
+
     # Validate table name
     if not _validate_identifier(table):
         return {"error": f"Invalid table name: {table}", "data_found": False}
 
-    # Look up default group_by from config if not provided
+    # Look up defaults from config
+    table_info = config.get_table_info(table)
     if group_by is None:
-        table_info = config.get_table_info(table)
         if table_info:
             group_by = table_info["default_group_by"]
         else:
             group_by = []
+
+    measures = table_info["measures"] if table_info else []
+
+    # Merge default filters from config with user-provided filters
+    # (user-provided values override defaults)
+    if table_info and table_info.get("default_filters"):
+        merged_filters = dict(table_info["default_filters"])
+        if filters:
+            merged_filters.update(filters)
+        filters = merged_filters
 
     # Validate group_by columns
     for col in group_by:
@@ -117,11 +148,20 @@ async def check_data_availability(
     schema = config.schema_name
     group_cols = ", ".join(f'"{col}"' for col in group_by)
 
+    # Build aggregation: use configured measures if available, else COUNT(*)
+    if measures:
+        agg_parts = [
+            f'{m.aggregation.upper()}("{m.column}") as "{m.column}"' for m in measures
+        ]
+        agg_clause = ", ".join(agg_parts)
+    else:
+        agg_clause = 'COUNT(*) as "ROW_COUNT"'
+
     if group_cols:
-        select_clause = f'{group_cols}, COUNT(*) as "ROW_COUNT"'
+        select_clause = f"{group_cols}, {agg_clause}"
         group_clause = f"GROUP BY {group_cols}"
     else:
-        select_clause = 'COUNT(*) as "ROW_COUNT"'
+        select_clause = agg_clause
         group_clause = ""
 
     # Build WHERE clause from filters
@@ -143,21 +183,41 @@ FROM "{schema}"."{table}"
 {group_clause}
 """.strip()
 
+    logger.info("check_data_availability: table=%s filters=%s group_by=%s", table, filters, group_by)
+    logger.debug("check_data_availability: query=\n%s", query)
+
     try:
         results = await conn.execute_sql(query)
-        total_rows = sum(r.get("ROW_COUNT", 0) for r in results)
+
+        # Build totals from measures or fallback to ROW_COUNT
+        if measures:
+            measure_cols = [m.column for m in measures]
+            totals = {col: sum(r.get(col, 0) or 0 for r in results) for col in measure_cols}
+            data_found = any(v != 0 for v in totals.values())
+        else:
+            totals = {"ROW_COUNT": sum(r.get("ROW_COUNT", 0) for r in results)}
+            data_found = len(results) > 0
+
+        logger.info(
+            "check_data_availability: data_found=%s totals=%s group_count=%d",
+            data_found, totals, len(results),
+        )
+        for row in results[:3]:
+            logger.debug("check_data_availability: sample_row=%s", row)
 
         return {
             "table": table,
-            "data_found": len(results) > 0,
-            "total_rows": total_rows,
+            "data_found": data_found,
+            "totals": totals,
             "group_count": len(results),
+            "sample_rows": results[:3],
             "groups": results,
             "filters_applied": filters or {},
             "group_by": group_by,
             "query": query,
         }
     except DatasphereQueryError as e:
+        logger.error("check_data_availability: query failed — %s", e)
         return {
             "error": str(e),
             "table": table,

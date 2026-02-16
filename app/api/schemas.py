@@ -1,8 +1,11 @@
 """API request and response schemas."""
 
+from enum import StrEnum
+
 from pydantic import BaseModel, Field
 
 # Health & Info
+
 
 class HealthResponse(BaseModel):
     """Health check response."""
@@ -15,7 +18,7 @@ class HealthResponse(BaseModel):
     skills_count: int
     tools_count: int
     knowledge_documents: int
-    business_db_healthy: bool
+    business_db_healthy: bool | None
 
 
 class SkillInfo(BaseModel):
@@ -35,6 +38,7 @@ class SkillsResponse(BaseModel):
 
 # Chat
 
+
 class ChatRequest(BaseModel):
     """Chat request body."""
 
@@ -51,6 +55,7 @@ class ToolCall(BaseModel):
     tool: str
     args: dict
     result: str
+    duration_seconds: float | None = None
 
 
 class ChatResponse(BaseModel):
@@ -60,9 +65,11 @@ class ChatResponse(BaseModel):
     tool_calls: list[ToolCall] = []
     session_id: str | None = None
     finished: bool = True
+    timing: dict | None = None
 
 
 # Knowledge/RAG
+
 
 class SearchRequest(BaseModel):
     """Knowledge search request."""
@@ -99,6 +106,7 @@ class IngestResponse(BaseModel):
 
 # Sessions
 
+
 class SessionInfo(BaseModel):
     """Session information."""
 
@@ -115,9 +123,25 @@ class SessionListResponse(BaseModel):
 
 # Errors
 
+
 class ErrorResponse(BaseModel):
     """Error response."""
 
     error: str
     detail: str | None = None
     code: str | None = None
+
+
+# Streaming
+
+
+class StreamEventType(StrEnum):
+    """Types of events emitted during streaming."""
+
+    THINKING = "thinking"
+    LLM_RESPONSE = "llm_response"
+    TOOL_CALL = "tool_call"
+    TOOL_RESULT = "tool_result"
+    TEXT_DELTA = "text_delta"
+    DONE = "done"
+    ERROR = "error"

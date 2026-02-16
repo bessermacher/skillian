@@ -23,11 +23,33 @@ def _get_connector(connector: Any) -> DatasphereConnector:
     return _connector
 
 
+_VERSION_TABLE_MAP = {
+    "001": "CV_ZBC_AA61",
+    "002": "CV_ZBC_AA61",
+    "003": "CV_ZBC_AA61",
+    "004": "CV_ZBC_AA61",
+    "021": "CV_ZBC_AA62",
+}
+
+
+def _build_next_step(inv: dict[str, Any]) -> dict[str, Any]:
+    """Build the next_step directive from an investigation's state."""
+    version = inv.get("version", "001")
+    table = _VERSION_TABLE_MAP.get(version, "CV_ZBC_AA61")
+    filters: dict[str, str] = {}
+    if inv.get("company_code"):
+        filters["ZCOMPCODE"] = inv["company_code"]
+    if inv.get("fiscal_period"):
+        filters["FISCPER"] = inv["fiscal_period"]
+    return {"action": "call check_data_availability now", "table": table, "filters": filters}
+
+
 def start_investigation(
     problem_description: str,
     report_name: str | None = None,
     company_code: str | None = None,
     fiscal_period: str | None = None,
+    version: str | None = None,
     connector: Any = None,
 ) -> dict[str, Any]:
     """Start a new data investigation."""
@@ -36,6 +58,22 @@ def start_investigation(
     if connector is not None:
         _get_connector(connector)
 
+    # Guard: refuse to restart if an investigation is already in progress.
+    # This prevents the LLM from looping on start_investigation instead of
+    # proceeding with the playbook.
+    if _current_investigation is not None and _current_investigation["status"] == "in_progress":
+        return {
+            "error": "Investigation already in progress. Do NOT call start_investigation again.",
+            "investigation_id": _current_investigation["id"],
+            "instruction": (
+                "Continue the current investigation. "
+                "Call check_data_availability NOW with the table and filters below."
+            ),
+            "next_step": _build_next_step(_current_investigation),
+        }
+
+    version = version or "001"
+
     _current_investigation = {
         "id": f"inv_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S_%f')}",
         "started_at": datetime.now(UTC).isoformat(),
@@ -43,6 +81,7 @@ def start_investigation(
         "report_name": report_name,
         "company_code": company_code,
         "fiscal_period": fiscal_period,
+        "version": version,
         "findings": [],
         "status": "in_progress",
     }
@@ -50,13 +89,7 @@ def start_investigation(
     return {
         "investigation_id": _current_investigation["id"],
         "status": "started",
-        "problem_description": problem_description,
-        "context": {
-            "report_name": report_name,
-            "company_code": company_code,
-            "fiscal_period": fiscal_period,
-        },
-        "message": "Investigation started. Follow the relevant playbook to diagnose the issue.",
+        "next_step": _build_next_step(_current_investigation),
     }
 
 

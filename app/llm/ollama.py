@@ -12,7 +12,7 @@ class OllamaProvider:
 
     base_url: str
     model: str
-    temperature: float = 0.7
+    temperature: float = 0.1
 
     def get_chat_model(self) -> BaseChatModel:
         """Return Ollama chat model."""

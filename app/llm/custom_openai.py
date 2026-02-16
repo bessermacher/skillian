@@ -13,7 +13,7 @@ class CustomOpenAIProvider:
     api_key: str
     base_url: str
     model: str
-    temperature: float = 0.7
+    temperature: float = 0.1
     max_tokens: int = 4096
     timeout: int = 60
     max_retries: int = 3

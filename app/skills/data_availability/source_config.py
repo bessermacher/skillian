@@ -7,6 +7,13 @@ import yaml
 from pydantic import BaseModel, Field
 
 
+class MeasureConfig(BaseModel):
+    """A key figure measure with column name and aggregation function."""
+
+    column: str
+    aggregation: str = "sum"
+
+
 class DimensionConfig(BaseModel):
     """A check dimension with its column name and aliases."""
 
@@ -29,6 +36,8 @@ class ReportConfig(BaseModel):
     versions: list[VersionConfig]
     check_dimensions: list[DimensionConfig]
     default_group_by: list[str]
+    measures: list[MeasureConfig] = []
+    default_filters: dict[str, str] = {}
 
 
 class TableConfig(BaseModel):
@@ -38,6 +47,8 @@ class TableConfig(BaseModel):
     table: str
     check_dimensions: list[DimensionConfig]
     default_group_by: list[str]
+    measures: list[MeasureConfig] = []
+    default_filters: dict[str, str] = {}
 
 
 class InvestigationSourceConfig(BaseModel):
@@ -67,6 +78,8 @@ class InvestigationSourceConfig(BaseModel):
                         "source_type": "report",
                         "default_group_by": report.default_group_by,
                         "check_dimensions": report.check_dimensions,
+                        "measures": report.measures,
+                        "default_filters": report.default_filters,
                     }
 
         for name, table_cfg in self.tables.items():
@@ -76,6 +89,8 @@ class InvestigationSourceConfig(BaseModel):
                     "source_type": "table",
                     "default_group_by": table_cfg.default_group_by,
                     "check_dimensions": table_cfg.check_dimensions,
+                    "measures": table_cfg.measures,
+                    "default_filters": table_cfg.default_filters,
                 }
 
         return None

@@ -1,8 +1,10 @@
 """API routes."""
 
+import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 
 from app.api.schemas import (
     ChatRequest,
@@ -56,15 +58,15 @@ async def health_check() -> HealthResponse:
     except Exception:
         doc_count = 0
 
-    # Check business database connectivity
+    # Check business database connectivity (optional)
     try:
         connector = get_business_connector()
-        business_db_healthy = await connector.health_check()
+        business_db_healthy = await connector.health_check() if connector else None
     except Exception:
         business_db_healthy = False
 
     return HealthResponse(
-        status="healthy" if business_db_healthy else "degraded",
+        status="healthy" if business_db_healthy is not False else "degraded",
         version=settings.app_version,
         environment=settings.env,
         llm_provider=provider.provider_name,
@@ -90,10 +92,7 @@ async def list_skills() -> SkillsResponse:
             SkillInfo(
                 name=skill.name,
                 description=skill.description,
-                tools=[
-                    {"name": t.name, "description": t.description}
-                    for t in skill.tools
-                ],
+                tools=[{"name": t.name, "description": t.description} for t in skill.tools],
                 knowledge_paths=skill.knowledge_paths,
             )
         )
@@ -143,11 +142,13 @@ async def chat(
                     tool=tc["tool"],
                     args=tc["args"],
                     result=tc["result"],
+                    duration_seconds=tc.get("duration_seconds"),
                 )
                 for tc in result.tool_calls_made
             ],
             session_id=session.session_id,
             finished=result.finished,
+            timing=result.timing or None,
         )
     except Exception:
         logger.exception("Chat processing failed for message: %s...", request.message[:50])
@@ -155,6 +156,50 @@ async def chat(
             status_code=500,
             detail="Failed to process message. Please try again.",
         )
+
+
+@router.post(
+    "/chat/stream",
+    tags=["Chat"],
+)
+async def chat_stream(
+    request: ChatRequest,
+    session_store: SessionStore = Depends(get_session_store),
+) -> StreamingResponse:
+    """Process a chat message with real-time SSE progress events."""
+    session = None
+    if request.session_id:
+        session = await session_store.get(request.session_id)
+
+    if not session:
+        session = await session_store.create()
+
+    async def event_generator():
+        try:
+            async for event in session.agent.process_stream(request.message):
+                event_type = event["event"]
+                event_data = json.dumps(event["data"])
+                yield f"event: {event_type}\ndata: {event_data}\n\n"
+
+            session.increment_messages()
+            await session_store.update(session)
+
+            yield f"event: session\ndata: {json.dumps({'session_id': session.session_id})}\n\n"
+
+        except Exception as e:
+            logger.exception("Streaming chat failed")
+            error_data = json.dumps({"message": str(e)})
+            yield f"event: error\ndata: {error_data}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # Sessions
@@ -179,11 +224,17 @@ async def create_session_and_chat(
         return ChatResponse(
             response=result.content,
             tool_calls=[
-                ToolCall(tool=tc["tool"], args=tc["args"], result=tc["result"])
+                ToolCall(
+                    tool=tc["tool"],
+                    args=tc["args"],
+                    result=tc["result"],
+                    duration_seconds=tc.get("duration_seconds"),
+                )
                 for tc in result.tool_calls_made
             ],
             session_id=session.session_id,
             finished=result.finished,
+            timing=result.timing or None,
         )
     except Exception:
         logger.exception("Failed to create session and process message")
@@ -217,11 +268,17 @@ async def session_chat(
         return ChatResponse(
             response=result.content,
             tool_calls=[
-                ToolCall(tool=tc["tool"], args=tc["args"], result=tc["result"])
+                ToolCall(
+                    tool=tc["tool"],
+                    args=tc["args"],
+                    result=tc["result"],
+                    duration_seconds=tc.get("duration_seconds"),
+                )
                 for tc in result.tool_calls_made
             ],
             session_id=session.session_id,
             finished=result.finished,
+            timing=result.timing or None,
         )
     except Exception:
         logger.exception("Failed to process message in session %s", session_id)

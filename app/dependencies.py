@@ -31,9 +31,11 @@ def get_chat_model() -> BaseChatModel:
 
 
 @lru_cache
-def get_business_connector() -> PostgresConnector:
-    """Get cached PostgreSQL connector for business data."""
+def get_business_connector() -> PostgresConnector | None:
+    """Get cached PostgreSQL connector for business data, or None if not configured."""
     settings = get_settings()
+    if not settings.business_database_url:
+        return None
     return PostgresConnector(settings.business_database_url)
 
 
@@ -62,8 +64,10 @@ def get_skill_loader() -> SkillLoader:
     """Get cached skill loader with connector factory."""
     connector_factory = {}
 
-    connector_factory["postgres"] = get_business_connector()
-    connector_factory["business"] = get_business_connector()
+    business = get_business_connector()
+    if business:
+        connector_factory["postgres"] = business
+        connector_factory["business"] = business
 
     datasphere = get_datasphere_connector()
     if datasphere:

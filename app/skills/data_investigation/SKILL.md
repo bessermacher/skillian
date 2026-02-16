@@ -23,26 +23,34 @@ you follow structured investigation playbooks to systematically diagnose the roo
 
 **Your workflow:**
 
-1. **Record the problem** using `start_investigation` with the user's description
-2. **Follow the matching playbook** from the sections below
-3. **At each step**, use the appropriate tool (from any skill), then **record the finding**
-   using `record_finding` with the step name, result, and your conclusion
-4. **Branch based on findings** — the playbooks describe what to do for each possible outcome
-5. **When done**, use `get_investigation_summary` to present all findings to the user
+1. **ALWAYS start** by calling `start_investigation` with the user's description
+2. **Immediately proceed** to the matching playbook below — do NOT wait for user input
+3. **At each step**, call the appropriate tool, then call `record_finding`
+4. **Branch based on findings** — the playbooks tell you exactly what to do next
+5. **When done**, call `get_investigation_summary` to present all findings
+
+**CRITICAL:** You MUST call tools at every step. Do NOT respond with text mid-investigation.
+Execute ALL playbook steps via tool calls before producing a final text response.
+The only acceptable text response is the summary at the very end, after `get_investigation_summary`.
 
 **Key principles:**
 - Always follow the playbook sequence — do not skip steps
 - Record every finding, including "no data found" results
 - When a finding indicates a branch, follow that branch
-- Use tools from other skills freely: `check_data_availability`, `check_ownership`,
-  `ds_execute_sql`, etc.
+- Use tools from other skills freely: `check_data_availability`, `check_ownership`, etc.
 - Present a clear summary at the end with root cause and recommended actions
 
+**IMPORTANT — Accurate findings:** When calling `record_finding`, you MUST use the **exact values**
+from the preceding tool result. Copy company codes, periods, scope values, totals, and data_found
+status directly from the tool response. Do NOT paraphrase from memory or use different values than
+what the tool returned. If `check_data_availability` returned `data_found: true` with CoCd 1110,
+your `record_finding` must reflect CoCd 1110 and state that data was found.
+
 **Field aliases** (users may use any of these):
-- Company Code = CoCd = Company = `/BIC/ZCOMPCODE`
+- Company Code = CoCd = Company = `ZCOMPCODE`
 - Period = Month = Fiscal Period = `FISCPER` = `0FISCPER`
-- Scope = Consolidation Scope = `/BIC/ZSCOPE`
-- Version = `/BIC/ZVERSION`
+- Scope = Consolidation Scope = `ZSCOPE`
+- Version = `ZVERSION`
 
 **Period format:** YYYYMMM (e.g., 2024012 = December 2024, 2024001 = January 2024).
 January = 001, February = 002, ..., December = 012.
@@ -74,20 +82,25 @@ company code, period, and/or version.
 **Before starting:** Gather from the user:
 - Company code (CoCd / ZCOMPCODE)
 - Fiscal period (format YYYYMMM, e.g. 2024012 for December 2024)
-- Version (default to 001 = Actual if user says "actual data")
+- Version / ZVERSION (default: 001 = Actual, unless the user specifies otherwise)
+- Group account / ZGRPACCT (default: 0000031100, unless the user specifies otherwise)
+
+**Note:** ZVERSION and ZGRPACCT have default values configured in `investigation_sources.yaml`.
+These defaults are automatically applied by `check_data_availability` when the user does not
+specify them. If the user provides different values, pass them as filters to override the defaults.
 
 **Step 1: Check reporting table**
 - Determine the correct table based on version:
   - Versions 001/002/003/004 → table `CV_ZBC_AA61`
   - Version 021 → table `CV_ZBC_AA62`
 - Use `check_data_availability` with the table, filtering by company code and fiscal period
-- Group by `/BIC/ZCOMPCODE`, `/BIC/ZVERSION`, `FISCPER`, `/BIC/ZSCOPE`
+- Group by `ZCOMPCODE`, `ZVERSION`, `FISCPER`, `ZSCOPE`
 - Record finding with `record_finding`
 
 **Step 1 outcomes:**
 - **Data found with expected scope (S_LEGAL, S_LEGAL_DKK, or S_LEGAL_SPECIAL):**
   Data exists in reporting. The issue may be in report configuration or user filters. Record finding and END.
-- **Data found but ALL rows have `/BIC/ZSCOPE` = 'S_NONE' only:**
+- **Data found but ALL rows have `ZSCOPE` = 'S_NONE' only:**
   Currency conversion was performed but consolidation stopped. Go to **Step 2A**.
 - **No data found at all:**
   Data is missing from the reporting table entirely. Go to **Step 2B**.
@@ -105,10 +118,10 @@ company code, period, and/or version.
 
 **Step 2B: Check BPC Mart**
 - Check the upstream BPC mart table `CV_ZFI_AA01`.
-- **Note:** `CV_ZFI_AA01` does NOT have `/BIC/ZSCOPE` or `/BIC/ZVERSION` fields.
-  Only filter by company code (`/BIC/ZCOMPCODE`) and fiscal period (`FISCPER`).
+- **Note:** `CV_ZFI_AA01` does NOT have `ZSCOPE` or `ZVERSION` fields.
+  Only filter by company code (`ZCOMPCODE`) and fiscal period (`FISCPER`).
 - Use `check_data_availability` with table `CV_ZFI_AA01`, filtering by company code and period only.
-- Group by `/BIC/ZCOMPCODE`, `FISCPER`.
+- Group by `ZCOMPCODE`, `FISCPER`.
 - Record finding with `record_finding`.
 
 **Step 2B outcomes:**
