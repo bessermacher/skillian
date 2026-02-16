@@ -33,7 +33,7 @@ def test_get_chat_model(custom_provider):
             api_key="test-key",
             base_url="https://test-api.example.com/v1",
             model="test-model",
-            temperature=0.7,
+            temperature=0.1,
             max_tokens=4096,
             timeout=60,
             max_retries=3,

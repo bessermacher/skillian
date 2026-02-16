@@ -12,7 +12,7 @@ class AnthropicProvider:
 
     api_key: str
     model: str = "claude-sonnet-4-20250514"
-    temperature: float = 0.7
+    temperature: float = 0.1
     max_tokens: int = 4096
 
     def get_chat_model(self) -> BaseChatModel:

@@ -28,6 +28,7 @@ class Settings(BaseSettings):
 
     # LLM Provider
     llm_provider: Literal["ollama", "anthropic", "openai", "custom_openai"] = "ollama"
+    llm_temperature: float = 0.1
 
     # Ollama
     ollama_base_url: str = "http://localhost:11434"
@@ -54,8 +55,8 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "postgresql+asyncpg://skillian:skillian@localhost:5432/skillian"
 
-    # Business Database (SAP BW data)
-    business_database_url: str = "postgresql://business:business@localhost:5433/business_db"
+    # Business Database (SAP BW data) — leave empty to disable
+    business_database_url: str = ""
 
     # SAP Datasphere (hdbcli)
     datasphere_host: str | None = None

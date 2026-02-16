@@ -59,6 +59,7 @@ class TestChatEndpoint:
         mock_response.content = "Test response"
         mock_response.tool_calls_made = []
         mock_response.finished = True
+        mock_response.timing = {}
         mock_agent.process = AsyncMock(return_value=mock_response)
 
         mock_session = MagicMock()
@@ -100,6 +101,7 @@ class TestChatEndpoint:
         mock_response.content = "Continued conversation"
         mock_response.tool_calls_made = []
         mock_response.finished = True
+        mock_response.timing = {}
         mock_agent.process = AsyncMock(return_value=mock_response)
 
         mock_session = MagicMock()

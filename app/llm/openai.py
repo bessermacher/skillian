@@ -12,7 +12,7 @@ class OpenAIProvider:
 
     api_key: str
     model: str = "gpt-4o"
-    temperature: float = 0.7
+    temperature: float = 0.1
 
     def get_chat_model(self) -> BaseChatModel:
         """Return OpenAI chat model."""

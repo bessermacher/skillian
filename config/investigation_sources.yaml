@@ -22,51 +22,62 @@ reports:
       - code: "021"
         name: "Forecast"
         table: "CV_ZBC_AA62"
+    measures:
+      - column: "CS_TRN_LC"
+        aggregation: sum
+      - column: "CS_TRN_GC"
+        aggregation: sum
     check_dimensions:
-      - column: "/BIC/ZCOMPCODE"
+      - column: "ZCOMPCODE"
         aliases: ["company_code", "cocd", "company"]
-      - column: "/BIC/ZVERSION"
+      - column: "ZVERSION"
         aliases: ["version", "zversion"]
       - column: "FISCPER"
         aliases: ["fiscal_period", "period", "month", "0fiscper"]
-      - column: "/BIC/ZSCOPE"
+      - column: "ZSCOPE"
         aliases: ["scope", "consolidation_scope", "zscope"]
     default_group_by:
-      - "/BIC/ZCOMPCODE"
-      - "/BIC/ZVERSION"
+      - "ZCOMPCODE"
+      - "ZVERSION"
       - "FISCPER"
-      - "/BIC/ZSCOPE"
+      - "ZSCOPE"
+    default_filters:
+      ZVERSION: "001"
+      ZGRPACCT: "0000031100"
 
 tables:
   bpc_mart:
     description: "BPC mart data (pre-reporting) — source for CV_ZBC_AA61. Does not have ZSCOPE or ZVERSION fields."
     table: "CV_ZFI_AA01"
+    measures:
+      - column: "CS_TRN_LC"
+        aggregation: sum
     check_dimensions:
-      - column: "/BIC/ZCOMPCODE"
+      - column: "ZCOMPCODE"
         aliases: ["company_code", "cocd", "company"]
       - column: "FISCPER"
         aliases: ["fiscal_period", "period", "month"]
     default_group_by:
-      - "/BIC/ZCOMPCODE"
+      - "ZCOMPCODE"
       - "FISCPER"
 
   ownership:
     description: "Company code ownership/scope membership table"
     table: "CV_ZBC_AA08Z"
     check_dimensions:
-      - column: "/BIC/ZCOMPCODE"
+      - column: "ZCOMPCODE"
         aliases: ["company_code", "cocd", "company"]
       - column: "FISCPER"
         aliases: ["fiscal_period", "period", "month"]
-      - column: "/BIC/ZSCOPE"
+      - column: "ZSCOPE"
         aliases: ["scope", "consolidation_scope", "zscope"]
-      - column: "/BIC/ZVERSION"
+      - column: "ZVERSION"
         aliases: ["version", "zversion"]
     default_group_by:
-      - "/BIC/ZCOMPCODE"
+      - "ZCOMPCODE"
       - "FISCPER"
-      - "/BIC/ZSCOPE"
-      - "/BIC/ZVERSION"
+      - "ZSCOPE"
+      - "ZVERSION"
 
 scope_values:
   S_NONE: "No consolidation scope - currency conversion only"

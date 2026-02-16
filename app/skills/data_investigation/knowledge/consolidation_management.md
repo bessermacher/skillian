@@ -18,10 +18,10 @@ versions, and scopes.
 
 ## Key Dimensions
 
-- **ZCOMPCODE** (`/BIC/ZCOMPCODE`): Company code (e.g., 1110, 5500)
-- **ZVERSION** (`/BIC/ZVERSION`): Version code (001, 002, etc.)
+- **ZCOMPCODE** (`ZCOMPCODE`): Company code (e.g., 1110, 5500)
+- **ZVERSION** (`ZVERSION`): Version code (001, 002, etc.)
 - **FISCPER**: Fiscal period in format YYYYMMM (e.g., 2024012 = December 2024)
-- **ZSCOPE** (`/BIC/ZSCOPE`): Consolidation scope
+- **ZSCOPE** (`ZSCOPE`): Consolidation scope
 
 ## Data Pipeline
 
@@ -35,7 +35,7 @@ If data is missing in the CM report, it could be missing at any point in this pi
 
 **Important:** The BPC mart table (`CV_ZFI_AA01`) is structurally different from the
 Consolidated Management PnL reporting tables (`CV_ZBC_AA61` / `CV_ZBC_AA62`).
-The BPC mart does **not** have `/BIC/ZSCOPE` or `/BIC/ZVERSION` fields — these are
+The BPC mart does **not** have `ZSCOPE` or `ZVERSION` fields — these are
 added during the consolidation process. All data in `CV_ZFI_AA01` is the source
 for `CV_ZBC_AA61`. When checking the BPC mart, only filter by company code and
 fiscal period.

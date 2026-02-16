@@ -27,7 +27,13 @@ tools:
       - name: fiscal_period
         type: string
         required: false
-        description: "Fiscal period being investigated (e.g. '2024012')"
+        description: "Fiscal period in YYYYMMM format (e.g. '2024012' for Dec 2024, '2024001' for Jan 2024)"
+      - name: version
+        type: string
+        required: false
+        description: >
+          Version code (e.g. '001' for Actuals, '021' for Forecast).
+          Defaults to '001' if not specified.
     implementation: app.skills.data_investigation.tools:start_investigation
 
   - name: record_finding
