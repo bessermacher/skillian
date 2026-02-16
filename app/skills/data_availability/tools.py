@@ -5,28 +5,16 @@ import re
 from pathlib import Path
 from typing import Any
 
-from app.connectors.datasphere import DatasphereConnector, DatasphereQueryError
+from app.connectors.datasphere import DatasphereQueryError
+from app.skills.common import get_connector
 
 logger = logging.getLogger(__name__)
-
-# Module-level connector cache
-_connector: DatasphereConnector | None = None
 
 # Module-level config cache
 _source_config: Any | None = None
 
 # Pattern for valid SQL identifiers (column/table names)
 _VALID_IDENTIFIER = re.compile(r'^[a-zA-Z0-9_/."]+$')
-
-
-def _get_connector(connector: Any) -> DatasphereConnector:
-    """Get or cache the Datasphere connector."""
-    global _connector
-    if connector is not None:
-        _connector = connector
-    if _connector is None:
-        raise ValueError("Datasphere connector not configured")
-    return _connector
 
 
 def _get_source_config():
@@ -47,7 +35,7 @@ def _validate_identifier(name: str) -> bool:
 def list_investigation_sources(connector: Any = None) -> dict[str, Any]:
     """List all configured investigation sources."""
     if connector is not None:
-        _get_connector(connector)
+        get_connector(connector)
 
     config = _get_source_config()
 
@@ -102,7 +90,7 @@ async def check_data_availability(
     connector: Any = None,
 ) -> dict[str, Any]:
     """Check if data exists in a Datasphere table for given filter criteria."""
-    conn = _get_connector(connector)
+    conn = get_connector(connector)
     config = _get_source_config()
 
     # Validate filters format — must be a flat dict of {column: value} pairs.

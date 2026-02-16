@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,6 +13,8 @@ from pydantic import BaseModel, Field, create_model
 
 from app.core.exception import ToolLoadError
 from app.core.tool import Tool
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -168,7 +171,7 @@ class OpenAPIToolGenerator:
                 tool = self._generate_tool(endpoint)
                 tools.append(tool)
             except Exception as e:
-                print(f"Warning: Failed to generate tool for {endpoint.operation_id}: {e}")
+                logger.warning("Failed to generate tool for %s: %s", endpoint.operation_id, e)
 
         return tools
 

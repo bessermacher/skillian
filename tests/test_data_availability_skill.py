@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.core.skill_loader import SkillLoader
+from app.skills import common as skills_common
 from app.skills.data_availability import tools as availability_tools
 from app.skills.data_availability.source_config import (
     InvestigationSourceConfig,
@@ -45,10 +46,10 @@ def skill(skill_loader):
 @pytest.fixture(autouse=True)
 def reset_module_state(mock_connector):
     """Reset module-level state between tests."""
-    availability_tools._connector = mock_connector
+    skills_common._connector = mock_connector
     availability_tools._source_config = None
     yield
-    availability_tools._connector = None
+    skills_common._connector = None
     availability_tools._source_config = None
 
 

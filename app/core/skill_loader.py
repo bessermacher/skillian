@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -9,6 +10,8 @@ from app.core.configured_skill import ConfiguredSkill
 from app.core.exception import SkillLoadError, ToolLoadError
 from app.core.skill_parser import parse_skill_md
 from app.core.yaml_tools import load_tools_from_yaml
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     pass
@@ -114,7 +117,7 @@ class SkillLoader:
                 skill = self.load_skill(skill_name)
                 skills.append(skill)
             except SkillLoadError as e:
-                print(f"Warning: Failed to load skill '{skill_name}': {e}")
+                logger.warning("Failed to load skill '%s': %s", skill_name, e)
         return skills
 
     def load_skill_metadata(

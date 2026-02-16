@@ -1,5 +1,6 @@
 """Vector store wrapper for RAG functionality using pgvector."""
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -8,6 +9,8 @@ from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_postgres import PGVector
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+logger = logging.getLogger(__name__)
 
 
 class VectorStoreError(Exception):
@@ -116,7 +119,7 @@ class VectorStore:
                 )
                 documents.append(doc)
             except Exception as e:
-                print(f"Warning: Could not read {file_path}: {e}")
+                logger.warning("Could not read %s: %s", file_path, e)
 
         return self.add_documents(documents)
 

@@ -3,24 +3,11 @@
 from datetime import UTC, datetime
 from typing import Any
 
-from app.connectors.datasphere import DatasphereConnector
-
-# Module-level connector cache
-_connector: DatasphereConnector | None = None
+from app.skills.common import get_connector
 
 # In-memory investigation state (conversation-scoped).
 # Replaced when a new investigation starts.
 _current_investigation: dict[str, Any] | None = None
-
-
-def _get_connector(connector: Any) -> DatasphereConnector:
-    """Get or cache the Datasphere connector."""
-    global _connector
-    if connector is not None:
-        _connector = connector
-    if _connector is None:
-        raise ValueError("Datasphere connector not configured")
-    return _connector
 
 
 _VERSION_TABLE_MAP = {
@@ -56,7 +43,7 @@ def start_investigation(
     global _current_investigation
 
     if connector is not None:
-        _get_connector(connector)
+        get_connector(connector)
 
     # Guard: refuse to restart if an investigation is already in progress.
     # This prevents the LLM from looping on start_investigation instead of
@@ -105,7 +92,7 @@ def record_finding(
     global _current_investigation
 
     if connector is not None:
-        _get_connector(connector)
+        get_connector(connector)
 
     if _current_investigation is None:
         return {
@@ -137,7 +124,7 @@ def get_investigation_summary(
 ) -> dict[str, Any]:
     """Get complete investigation summary."""
     if connector is not None:
-        _get_connector(connector)
+        get_connector(connector)
 
     if _current_investigation is None:
         return {
