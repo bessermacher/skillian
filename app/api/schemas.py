@@ -7,6 +7,25 @@ from pydantic import BaseModel, Field
 # Health & Info
 
 
+class EndpointStatus(BaseModel):
+    """Health status of a single external endpoint."""
+
+    name: str
+    url: str
+    healthy: bool
+    response_time_ms: float | None = None
+    status_code: int | None = None
+    error: str | None = None
+
+
+class SystemStatus(BaseModel):
+    """Aggregated health status of an external system."""
+
+    system: str
+    healthy: bool
+    endpoints: list[EndpointStatus]
+
+
 class HealthResponse(BaseModel):
     """Health check response."""
 
@@ -19,6 +38,7 @@ class HealthResponse(BaseModel):
     tools_count: int
     knowledge_documents: int
     business_db_healthy: bool | None
+    external_systems: list[SystemStatus] | None = None
 
 
 class SkillInfo(BaseModel):

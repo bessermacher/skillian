@@ -1,14 +1,18 @@
 """API routes."""
 
+import asyncio
 import json
 import logging
+import time
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.api.schemas import (
     ChatRequest,
     ChatResponse,
+    EndpointStatus,
     ErrorResponse,
     HealthResponse,
     IngestResponse,
@@ -19,6 +23,7 @@ from app.api.schemas import (
     SessionListResponse,
     SkillInfo,
     SkillsResponse,
+    SystemStatus,
     ToolCall,
 )
 from app.api.sessions import SessionStore
@@ -38,6 +43,65 @@ router = APIRouter()
 
 
 # Health & Info
+
+
+async def _probe_endpoint(
+    client: httpx.AsyncClient, name: str, url: str
+) -> EndpointStatus:
+    """Probe a single external endpoint and return its status."""
+    start = time.monotonic()
+    try:
+        resp = await client.get(url)
+        elapsed_ms = (time.monotonic() - start) * 1000
+        return EndpointStatus(
+            name=name,
+            url=url,
+            healthy=resp.status_code < 500,
+            response_time_ms=round(elapsed_ms, 1),
+            status_code=resp.status_code,
+        )
+    except Exception as exc:
+        elapsed_ms = (time.monotonic() - start) * 1000
+        return EndpointStatus(
+            name=name,
+            url=url,
+            healthy=False,
+            response_time_ms=round(elapsed_ms, 1),
+            error=str(exc),
+        )
+
+
+async def _check_external_systems(settings) -> list[SystemStatus]:
+    """Probe all configured external SAP systems concurrently."""
+    configured = settings.external_systems
+    if not configured:
+        return []
+
+    timeout = httpx.Timeout(settings.external_health_timeout)
+    async with httpx.AsyncClient(verify=False, timeout=timeout) as client:
+        # Build flat list of (system_name, name, url) for concurrent probing
+        tasks = []
+        task_keys = []
+        for system_name, endpoints in configured.items():
+            for ep in endpoints:
+                tasks.append(_probe_endpoint(client, ep["name"], ep["url"]))
+                task_keys.append(system_name)
+
+        results = await asyncio.gather(*tasks)
+
+    # Group results by system
+    grouped: dict[str, list[EndpointStatus]] = {}
+    for system_name, status in zip(task_keys, results, strict=True):
+        grouped.setdefault(system_name, []).append(status)
+
+    return [
+        SystemStatus(
+            system=system_name,
+            healthy=all(ep.healthy for ep in endpoints),
+            endpoints=endpoints,
+        )
+        for system_name, endpoints in grouped.items()
+    ]
 
 
 @router.get(
@@ -65,8 +129,22 @@ async def health_check() -> HealthResponse:
     except Exception:
         business_db_healthy = False
 
+    # Check external SAP systems
+    try:
+        external_systems = await _check_external_systems(settings)
+    except Exception:
+        logger.exception("External system health check failed")
+        external_systems = []
+
+    # Determine overall status
+    any_external_unhealthy = any(not s.healthy for s in external_systems)
+    if business_db_healthy is False or any_external_unhealthy:
+        status = "degraded"
+    else:
+        status = "healthy"
+
     return HealthResponse(
-        status="healthy" if business_db_healthy is not False else "degraded",
+        status=status,
         version=settings.app_version,
         environment=settings.env,
         llm_provider=provider.provider_name,
@@ -75,6 +153,7 @@ async def health_check() -> HealthResponse:
         tools_count=registry.tool_count,
         knowledge_documents=doc_count,
         business_db_healthy=business_db_healthy,
+        external_systems=external_systems or None,
     )
 
 

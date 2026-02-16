@@ -69,6 +69,35 @@ class Settings(BaseSettings):
     datasphere_timeout: int = 60
     datasphere_pool_size: int = 4
 
+    # External SAP systems (health probing) — leave empty to disable
+    sap_bw_ping_url: str = ""
+    sap_bo_launchpad_url: str = ""
+    sap_bo_cmc_url: str = ""
+    sap_bo_rest_api_url: str = ""
+    external_health_timeout: int = 5
+
+    @property
+    def external_systems(self) -> dict[str, list[dict[str, str]]]:
+        """Build grouped external system endpoints from configured URLs."""
+        systems: dict[str, list[dict[str, str]]] = {}
+
+        if self.sap_bw_ping_url:
+            systems["SAP_BW"] = [
+                {"name": "BW Ping", "url": self.sap_bw_ping_url},
+            ]
+
+        bo_endpoints = []
+        if self.sap_bo_launchpad_url:
+            bo_endpoints.append({"name": "BI Launchpad", "url": self.sap_bo_launchpad_url})
+        if self.sap_bo_cmc_url:
+            bo_endpoints.append({"name": "CMC", "url": self.sap_bo_cmc_url})
+        if self.sap_bo_rest_api_url:
+            bo_endpoints.append({"name": "REST API", "url": self.sap_bo_rest_api_url})
+        if bo_endpoints:
+            systems["SAP_BO"] = bo_endpoints
+
+        return systems
+
     @property
     def is_development(self) -> bool:
         return self.env == "development"

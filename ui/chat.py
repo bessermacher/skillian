@@ -45,11 +45,36 @@ with st.sidebar:
 
     # Health check
     try:
-        health = requests.get(f"{backend_url}/api/v1/health", timeout=2)
+        health = requests.get(f"{backend_url}/api/v1/health", timeout=5)
         if health.status_code == 200:
             data = health.json()
-            st.success(f"Backend: {data.get('status', 'ok')}")
+            status = data.get("status", "ok")
+            if status == "healthy":
+                st.success(f"Backend: {status}")
+            else:
+                st.warning(f"Backend: {status}")
             st.caption(f"LLM: {data.get('llm_provider', 'unknown')}")
+
+            # External SAP systems
+            for system in data.get("external_systems") or []:
+                system_name = system.get("system", "Unknown")
+                system_healthy = system.get("healthy", False)
+
+                if system_healthy:
+                    st.success(f"{system_name}: reachable")
+                else:
+                    st.error(f"{system_name}: unreachable")
+
+                with st.expander(f"{system_name} endpoints", expanded=False):
+                    for ep in system.get("endpoints", []):
+                        ep_name = ep.get("name", "")
+                        if ep.get("healthy"):
+                            rt = ep.get("response_time_ms")
+                            code = ep.get("status_code")
+                            st.caption(f":green[{ep_name}] — {code} ({rt:.0f}ms)")
+                        else:
+                            error = ep.get("error", "unhealthy")
+                            st.caption(f":red[{ep_name}] — {error}")
         else:
             st.error("Backend unhealthy")
     except requests.exceptions.RequestException:
