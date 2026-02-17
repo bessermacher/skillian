@@ -36,11 +36,17 @@ reports:
         aliases: ["fiscal_period", "period", "month", "0fiscper"]
       - column: "ZSCOPE"
         aliases: ["scope", "consolidation_scope", "zscope"]
+      - column: "CURKEY_LC"
+        aliases: ["local_currency", "currency_lc"]
+      - column: "CURKEY_GC"
+        aliases: ["group_currency", "currency_gc"]
     default_group_by:
       - "ZCOMPCODE"
       - "ZVERSION"
       - "FISCPER"
       - "ZSCOPE"
+      - "CURKEY_LC"
+      - "CURKEY_GC"
     default_filters:
       ZVERSION: "001"
       ZGRPACCT: "0000031100"
@@ -57,9 +63,12 @@ tables:
         aliases: ["company_code", "cocd", "company"]
       - column: "FISCPER"
         aliases: ["fiscal_period", "period", "month"]
+      - column: "CURKEY_LC"
+        aliases: ["local_currency", "currency_lc"]
     default_group_by:
       - "ZCOMPCODE"
       - "FISCPER"
+      - "CURKEY_LC"
 
   ownership:
     description: "Company code ownership/scope membership table"
