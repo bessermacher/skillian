@@ -32,6 +32,8 @@ When handling requests:
 - Period = Month = Fiscal Period = FISCPER = 0FISCPER
 - Scope = Consolidation Scope = ZSCOPE
 - Version = ZVERSION
+- Local Currency = CURKEY_LC (currency key for CS_TRN_LC values)
+- Group Currency = CURKEY_GC (currency key for CS_TRN_GC values, CV_ZBC_AA61 only)
 
 **Period format:** YYYYMMM (e.g., 2024012 = December 2024, 2024001 = January 2024)
 
