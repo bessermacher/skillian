@@ -18,6 +18,14 @@ _VERSION_TABLE_MAP = {
     "021": "CV_ZBC_AA62",
 }
 
+_VERSION_NAMES = {
+    "001": "Actual",
+    "002": "Actuals at last year budget rate",
+    "003": "Actuals at budget rate",
+    "004": "Actuals at next year budget rate",
+    "021": "Forecast",
+}
+
 
 def _build_next_step(inv: dict[str, Any]) -> dict[str, Any]:
     """Build the next_step directive from an investigation's state."""
@@ -28,7 +36,13 @@ def _build_next_step(inv: dict[str, Any]) -> dict[str, Any]:
         filters["ZCOMPCODE"] = inv["company_code"]
     if inv.get("fiscal_period"):
         filters["FISCPER"] = inv["fiscal_period"]
-    return {"action": "call check_data_availability now", "table": table, "filters": filters}
+    return {
+        "action": "call check_data_availability now",
+        "table": table,
+        "filters": filters,
+        "version": version,
+        "version_name": _VERSION_NAMES.get(version, f"Version {version}"),
+    }
 
 
 def start_investigation(
@@ -149,6 +163,8 @@ def get_investigation_summary(
             "report_name": inv["report_name"],
             "company_code": inv["company_code"],
             "fiscal_period": inv["fiscal_period"],
+            "version": inv.get("version", "001"),
+            "version_name": _VERSION_NAMES.get(inv.get("version", "001"), "Unknown"),
         },
         "started_at": inv["started_at"],
         "status": overall_status,
