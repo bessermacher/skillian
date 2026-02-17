@@ -230,6 +230,28 @@ present the final summary as text.
 
     _LEGAL_SCOPES = {"S_LEGAL", "S_LEGAL_DKK", "S_LEGAL_SPECIAL"}
 
+    @staticmethod
+    def _format_totals_with_currency(
+        totals: dict[str, Any], groups: list[dict[str, Any]],
+    ) -> str:
+        """Format totals dict with currency codes extracted from group data."""
+        lc_currencies = {g.get("CURKEY_LC") for g in groups if g.get("CURKEY_LC")}
+        gc_currencies = {g.get("CURKEY_GC") for g in groups if g.get("CURKEY_GC")}
+
+        lc_label = ", ".join(sorted(lc_currencies)) if lc_currencies else "LC"
+        gc_label = ", ".join(sorted(gc_currencies)) if gc_currencies else "GC"
+
+        parts: list[str] = []
+        if "CS_TRN_LC" in totals:
+            parts.append(f"LC: {totals['CS_TRN_LC']:,.2f} {lc_label}")
+        if "CS_TRN_GC" in totals:
+            parts.append(f"GC: {totals['CS_TRN_GC']:,.2f} {gc_label}")
+        for key, value in totals.items():
+            if key not in ("CS_TRN_LC", "CS_TRN_GC"):
+                parts.append(f"{key}: {value}")
+
+        return "; ".join(parts) if parts else str(totals)
+
     async def _auto_execute_tool(
         self,
         tool_name: str,
@@ -308,6 +330,8 @@ present the final summary as text.
         company_code = filters.get("ZCOMPCODE", "")
         fiscal_period = filters.get("FISCPER", "")
         table = next_step["table"]
+        version = next_step.get("version", "001")
+        version_name = next_step.get("version_name", f"Version {version}")
 
         # --- Step 1: check_data_availability on reporting table ---
         check_args: dict[str, Any] = {"table": table}
@@ -332,6 +356,8 @@ present the final summary as text.
         all_s_none = scopes and all(s == "S_NONE" for s in scopes)
 
         # --- Branch based on Step 1 result ---
+        formatted_totals = self._format_totals_with_currency(totals, groups)
+
         if data_found and has_legal:
             # Data found with expected legal scope — END
             scope_list = ", ".join(scopes)
@@ -341,9 +367,9 @@ present the final summary as text.
                     "tool_used": "check_data_availability",
                     "result_summary": (
                         f"Data found in {table} for CoCd {company_code}, "
-                        f"period {fiscal_period}. "
+                        f"period {fiscal_period}, version {version} ({version_name}). "
                         f"{len(groups)} scope groups: {scope_list}. "
-                        f"Totals: {totals}"
+                        f"Totals: {formatted_totals}"
                     ),
                     "conclusion": (
                         "Data exists with expected legal consolidation scope "
@@ -363,8 +389,9 @@ present the final summary as text.
                     "tool_used": "check_data_availability",
                     "result_summary": (
                         f"Data found in {table} but only S_NONE scope. "
-                        f"CoCd {company_code}, period {fiscal_period}. "
-                        f"Totals: {totals}"
+                        f"CoCd {company_code}, period {fiscal_period}, "
+                        f"version {version} ({version_name}). "
+                        f"Totals: {formatted_totals}"
                     ),
                     "conclusion": (
                         "Currency conversion ran but consolidation stopped. "
@@ -434,7 +461,8 @@ present the final summary as text.
                     "tool_used": "check_data_availability",
                     "result_summary": (
                         f"No data found in {table} for CoCd {company_code}, "
-                        f"period {fiscal_period}."
+                        f"period {fiscal_period}, "
+                        f"version {version} ({version_name})."
                     ),
                     "conclusion": (
                         "Data missing from reporting table entirely. "
@@ -509,8 +537,9 @@ present the final summary as text.
                     "tool_used": "check_data_availability",
                     "result_summary": (
                         f"Data found in {table} with scopes: {scope_list}. "
-                        f"CoCd {company_code}, period {fiscal_period}. "
-                        f"Totals: {totals}"
+                        f"CoCd {company_code}, period {fiscal_period}, "
+                        f"version {version} ({version_name}). "
+                        f"Totals: {formatted_totals}"
                     ),
                     "conclusion": (
                         f"Data exists with non-standard scopes ({scope_list}). "
