@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import Agent
@@ -45,8 +45,18 @@ def _deserialize_conversation(data: dict[str, Any]) -> Conversation:
 
 
 @dataclass
+class SessionInfo:
+    """Lightweight session metadata (no agent attached)."""
+
+    session_id: str
+    created_at: datetime = field(default_factory=datetime.now)
+    last_accessed: datetime = field(default_factory=datetime.now)
+    message_count: int = 0
+
+
+@dataclass
 class Session:
-    """A conversation session."""
+    """A conversation session with an active agent."""
 
     session_id: str
     agent: Agent
@@ -115,9 +125,7 @@ class SessionStore:
         except ValueError:
             return None
 
-        result = await self._db.execute(
-            select(SessionModel).where(SessionModel.id == session_uuid)
-        )
+        result = await self._db.execute(select(SessionModel).where(SessionModel.id == session_uuid))
         db_session = result.scalar_one_or_none()
 
         if db_session is None:
@@ -142,9 +150,7 @@ class SessionStore:
             session: Session to update.
         """
         session_uuid = UUID(session.session_id)
-        result = await self._db.execute(
-            select(SessionModel).where(SessionModel.id == session_uuid)
-        )
+        result = await self._db.execute(select(SessionModel).where(SessionModel.id == session_uuid))
         db_session = result.scalar_one_or_none()
 
         if db_session:
@@ -166,9 +172,7 @@ class SessionStore:
         except ValueError:
             return False
 
-        result = await self._db.execute(
-            select(SessionModel).where(SessionModel.id == session_uuid)
-        )
+        result = await self._db.execute(select(SessionModel).where(SessionModel.id == session_uuid))
         db_session = result.scalar_one_or_none()
 
         if db_session:
@@ -177,27 +181,22 @@ class SessionStore:
             return True
         return False
 
-    async def list_all(self) -> list[Session]:
-        """List all sessions (metadata only, no agent loaded)."""
+    async def list_all(self) -> list[SessionInfo]:
+        """List all sessions (metadata only — no agent created)."""
         result = await self._db.execute(select(SessionModel))
         db_sessions = result.scalars().all()
 
-        sessions = []
-        for db_session in db_sessions:
-            # Create lightweight session without fully loading agent
-            agent = self._agent_factory()
-            sessions.append(
-                Session(
-                    session_id=str(db_session.id),
-                    agent=agent,
-                    created_at=db_session.created_at,
-                    last_accessed=db_session.last_accessed,
-                    message_count=db_session.message_count,
-                )
+        return [
+            SessionInfo(
+                session_id=str(db_session.id),
+                created_at=db_session.created_at,
+                last_accessed=db_session.last_accessed,
+                message_count=db_session.message_count,
             )
-        return sessions
+            for db_session in db_sessions
+        ]
 
     async def count(self) -> int:
         """Get the number of active sessions."""
-        result = await self._db.execute(select(SessionModel))
-        return len(result.scalars().all())
+        result = await self._db.execute(select(func.count()).select_from(SessionModel))
+        return result.scalar() or 0

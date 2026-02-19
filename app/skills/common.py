@@ -26,9 +26,3 @@ def get_connector(connector: Any = None) -> DatasphereConnector:
     if _connector is None:
         raise ValueError("Datasphere connector not configured")
     return _connector
-
-
-def reset_connector() -> None:
-    """Reset the cached connector (for testing)."""
-    global _connector
-    _connector = None

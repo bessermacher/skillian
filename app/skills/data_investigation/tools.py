@@ -1,13 +1,17 @@
 """Tool implementations for data_investigation skill."""
 
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Any
 
 from app.skills.common import get_connector
 
-# In-memory investigation state (conversation-scoped).
-# Replaced when a new investigation starts.
-_current_investigation: dict[str, Any] | None = None
+# Request-scoped investigation state via contextvars.
+# Each asyncio task (i.e. each FastAPI request) gets its own value,
+# preventing cross-request leakage in concurrent scenarios.
+_current_investigation: ContextVar[dict[str, Any] | None] = ContextVar(
+    "_current_investigation", default=None
+)
 
 
 _VERSION_TABLE_MAP = {
@@ -54,28 +58,26 @@ def start_investigation(
     connector: Any = None,
 ) -> dict[str, Any]:
     """Start a new data investigation."""
-    global _current_investigation
-
     if connector is not None:
         get_connector(connector)
 
+    current = _current_investigation.get()
+
     # Guard: refuse to restart if an investigation is already in progress.
-    # This prevents the LLM from looping on start_investigation instead of
-    # proceeding with the playbook.
-    if _current_investigation is not None and _current_investigation["status"] == "in_progress":
+    if current is not None and current["status"] == "in_progress":
         return {
             "error": "Investigation already in progress. Do NOT call start_investigation again.",
-            "investigation_id": _current_investigation["id"],
+            "investigation_id": current["id"],
             "instruction": (
                 "Continue the current investigation. "
                 "Call check_data_availability NOW with the table and filters below."
             ),
-            "next_step": _build_next_step(_current_investigation),
+            "next_step": _build_next_step(current),
         }
 
     version = version or "001"
 
-    _current_investigation = {
+    new_inv = {
         "id": f"inv_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S_%f')}",
         "started_at": datetime.now(UTC).isoformat(),
         "problem_description": problem_description,
@@ -86,11 +88,12 @@ def start_investigation(
         "findings": [],
         "status": "in_progress",
     }
+    _current_investigation.set(new_inv)
 
     return {
-        "investigation_id": _current_investigation["id"],
+        "investigation_id": new_inv["id"],
         "status": "started",
-        "next_step": _build_next_step(_current_investigation),
+        "next_step": _build_next_step(new_inv),
     }
 
 
@@ -103,18 +106,18 @@ def record_finding(
     connector: Any = None,
 ) -> dict[str, Any]:
     """Record a finding from an investigation step."""
-    global _current_investigation
-
     if connector is not None:
         get_connector(connector)
 
-    if _current_investigation is None:
+    current = _current_investigation.get()
+
+    if current is None:
         return {
             "error": "No active investigation. Call start_investigation first.",
         }
 
     finding = {
-        "step_number": len(_current_investigation["findings"]) + 1,
+        "step_number": len(current["findings"]) + 1,
         "step_name": step_name,
         "tool_used": tool_used,
         "result_summary": result_summary,
@@ -123,13 +126,13 @@ def record_finding(
         "recorded_at": datetime.now(UTC).isoformat(),
     }
 
-    _current_investigation["findings"].append(finding)
+    current["findings"].append(finding)
 
     return {
         "recorded": True,
         "step_number": finding["step_number"],
         "step_name": step_name,
-        "total_findings": len(_current_investigation["findings"]),
+        "total_findings": len(current["findings"]),
     }
 
 
@@ -140,14 +143,15 @@ def get_investigation_summary(
     if connector is not None:
         get_connector(connector)
 
-    if _current_investigation is None:
+    current = _current_investigation.get()
+
+    if current is None:
         return {
             "error": "No active investigation.",
             "findings": [],
         }
 
-    inv = _current_investigation
-    finding_statuses = [f["status"] for f in inv["findings"]]
+    finding_statuses = [f["status"] for f in current["findings"]]
 
     if "issue_found" in finding_statuses:
         overall_status = "issues_identified"
@@ -157,17 +161,17 @@ def get_investigation_summary(
         overall_status = "investigation_in_progress"
 
     return {
-        "investigation_id": inv["id"],
-        "problem_description": inv["problem_description"],
+        "investigation_id": current["id"],
+        "problem_description": current["problem_description"],
         "context": {
-            "report_name": inv["report_name"],
-            "company_code": inv["company_code"],
-            "fiscal_period": inv["fiscal_period"],
-            "version": inv.get("version", "001"),
-            "version_name": _VERSION_NAMES.get(inv.get("version", "001"), "Unknown"),
+            "report_name": current["report_name"],
+            "company_code": current["company_code"],
+            "fiscal_period": current["fiscal_period"],
+            "version": current.get("version", "001"),
+            "version_name": _VERSION_NAMES.get(current.get("version", "001"), "Unknown"),
         },
-        "started_at": inv["started_at"],
+        "started_at": current["started_at"],
         "status": overall_status,
-        "total_findings": len(inv["findings"]),
-        "findings": inv["findings"],
+        "total_findings": len(current["findings"]),
+        "findings": current["findings"],
     }

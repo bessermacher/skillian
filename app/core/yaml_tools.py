@@ -6,8 +6,9 @@ import asyncio
 import functools
 import importlib
 import inspect
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field, create_model
@@ -339,116 +340,3 @@ def _build_query_function(
             return {"error": str(e), "query": query}
 
     return execute_query
-
-
-# Utility function for validation
-def validate_tools_yaml(yaml_path: Path | str) -> dict[str, Any]:
-    """Validate a tools.yaml file without loading implementations.
-
-    Args:
-        yaml_path: Path to tools.yaml
-
-    Returns:
-        Dict with 'valid', 'errors', 'warnings' keys
-    """
-    yaml_path = Path(yaml_path)
-    errors = []
-    warnings = []
-
-    if not yaml_path.exists():
-        return {
-            "valid": False,
-            "errors": [f"File not found: {yaml_path}"],
-            "warnings": [],
-        }
-
-    try:
-        content = yaml.safe_load(yaml_path.read_text())
-    except yaml.YAMLError as e:
-        return {
-            "valid": False,
-            "errors": [f"Invalid YAML: {e}"],
-            "warnings": [],
-        }
-
-    if not isinstance(content, dict):
-        errors.append("Root must be a dictionary")
-        return {"valid": False, "errors": errors, "warnings": warnings}
-
-    if "tools" not in content:
-        errors.append("Missing 'tools' key")
-        return {"valid": False, "errors": errors, "warnings": warnings}
-
-    tools = content["tools"]
-    if not isinstance(tools, list):
-        errors.append("'tools' must be a list")
-        return {"valid": False, "errors": errors, "warnings": warnings}
-
-    seen_names = set()
-    for i, tool in enumerate(tools):
-        # Check name
-        if "name" not in tool:
-            errors.append(f"Tool at index {i} missing 'name'")
-            continue
-
-        name = tool["name"]
-        if name in seen_names:
-            errors.append(f"Duplicate tool name: '{name}'")
-        seen_names.add(name)
-
-        # Check description
-        if "description" not in tool:
-            warnings.append(f"Tool '{name}' missing description")
-
-        # Check implementation or query_template
-        has_impl = "implementation" in tool
-        has_query = "query_template" in tool
-
-        if not has_impl and not has_query:
-            errors.append(
-                f"Tool '{name}' needs 'implementation' or 'query_template'"
-            )
-
-        if has_impl and has_query:
-            warnings.append(f"Tool '{name}' has both implementation and query_template")
-
-        # Validate parameters
-        params = tool.get("parameters", [])
-        if not isinstance(params, list):
-            errors.append(f"Tool '{name}' parameters must be a list")
-            continue
-
-        param_names = set()
-        for param in params:
-            if "name" not in param:
-                errors.append(f"Tool '{name}' has parameter without name")
-                continue
-
-            pname = param["name"]
-            if pname in param_names:
-                errors.append(f"Tool '{name}' has duplicate parameter: '{pname}'")
-            param_names.add(pname)
-
-            # Check type
-            ptype = param.get("type", "string")
-            valid_types = {
-                "string",
-                "integer",
-                "int",
-                "number",
-                "float",
-                "boolean",
-                "bool",
-                "array",
-                "list",
-                "object",
-                "dict",
-            }
-            if ptype.lower() not in valid_types:
-                warnings.append(f"Tool '{name}' parameter '{pname}' has unusual type: '{ptype}'")
-
-    return {
-        "valid": len(errors) == 0,
-        "errors": errors,
-        "warnings": warnings,
-    }

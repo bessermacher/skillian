@@ -1,8 +1,9 @@
 """Integration tests for Datasphere (requires real connection)."""
 
 import pytest
-from app.connectors.datasphere import DatasphereConnector
+
 from app.config import get_settings
+from app.connectors.datasphere import DatasphereConnector
 
 
 @pytest.fixture

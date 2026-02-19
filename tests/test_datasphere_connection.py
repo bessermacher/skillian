@@ -4,7 +4,6 @@ Tests connect, close, health check, reconnection, error handling,
 and context manager behaviour using mocked hdbcli.
 """
 
-import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock, patch
 
@@ -43,10 +42,13 @@ def mock_dbapi():
 # Initialisation
 # ---------------------------------------------------------------------------
 
+
 class TestConnectorInit:
     def test_default_parameters(self):
         c = DatasphereConnector(
-            host="host", user="user", password="pw",
+            host="host",
+            user="user",
+            password="pw",
         )
         assert c.port == 443
         assert c.encrypt is True
@@ -56,9 +58,14 @@ class TestConnectorInit:
 
     def test_custom_parameters(self):
         c = DatasphereConnector(
-            host="host", user="user", password="pw",
-            port=30015, encrypt=False, ssl_validate_certificate=False,
-            timeout=120, pool_size=8,
+            host="host",
+            user="user",
+            password="pw",
+            port=30015,
+            encrypt=False,
+            ssl_validate_certificate=False,
+            timeout=120,
+            pool_size=8,
         )
         assert c.port == 30015
         assert c.encrypt is False
@@ -74,6 +81,7 @@ class TestConnectorInit:
 # ---------------------------------------------------------------------------
 # connect()
 # ---------------------------------------------------------------------------
+
 
 class TestConnect:
     @pytest.mark.asyncio
@@ -119,6 +127,7 @@ class TestConnect:
 # close()
 # ---------------------------------------------------------------------------
 
+
 class TestClose:
     @pytest.mark.asyncio
     async def test_close_cleans_up(self, connector, mock_dbapi):
@@ -155,11 +164,14 @@ class TestClose:
 # Context manager
 # ---------------------------------------------------------------------------
 
+
 class TestContextManager:
     @pytest.mark.asyncio
     async def test_context_manager_connects_and_closes(self, mock_dbapi):
         connector = DatasphereConnector(
-            host="host", user="user", password="pw",
+            host="host",
+            user="user",
+            password="pw",
         )
 
         async with connector as ctx:
@@ -173,7 +185,9 @@ class TestContextManager:
     @pytest.mark.asyncio
     async def test_context_manager_closes_on_exception(self, mock_dbapi):
         connector = DatasphereConnector(
-            host="host", user="user", password="pw",
+            host="host",
+            user="user",
+            password="pw",
         )
 
         with pytest.raises(RuntimeError):
@@ -186,6 +200,7 @@ class TestContextManager:
 # ---------------------------------------------------------------------------
 # health_check()
 # ---------------------------------------------------------------------------
+
 
 class TestHealthCheck:
     @pytest.mark.asyncio
@@ -222,6 +237,7 @@ class TestHealthCheck:
 # ---------------------------------------------------------------------------
 # Operations without connection
 # ---------------------------------------------------------------------------
+
 
 class TestNotConnectedErrors:
     @pytest.mark.asyncio

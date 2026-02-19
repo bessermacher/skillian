@@ -35,10 +35,16 @@ class TestPostgresConnector:
         mock_rows = [{"id": 1, "name": "test"}, {"id": 2, "name": "test2"}]
 
         mock_conn = AsyncMock()
-        mock_conn.fetch = AsyncMock(return_value=[
-            MagicMock(**{"__iter__": lambda s: iter([("id", 1), ("name", "test")]),
-                        "keys": lambda: ["id", "name"]}),
-        ])
+        mock_conn.fetch = AsyncMock(
+            return_value=[
+                MagicMock(
+                    **{
+                        "__iter__": lambda s: iter([("id", 1), ("name", "test")]),
+                        "keys": lambda: ["id", "name"],
+                    }
+                ),
+            ]
+        )
 
         mock_pool = AsyncMock()
         mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
@@ -105,9 +111,10 @@ class TestPostgresConnectorIntegration:
     async def connector(self):
         """Create connector with real database."""
         import os
+
         url = os.environ.get(
             "TEST_BUSINESS_DATABASE_URL",
-            "postgresql://business:business@localhost:5433/business_db"
+            "postgresql://business:business@localhost:5433/business_db",
         )
         conn = PostgresConnector(url)
         yield conn
