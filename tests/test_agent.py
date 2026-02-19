@@ -917,3 +917,78 @@ class TestAgent:
 
         assert len(agent.conversation) == 1
         assert agent.conversation.messages[0].role.value == "system"
+
+    def test_system_prompt_has_structured_sections(self, mock_model, registry):
+        """System prompt should contain structured sections with markdown headers."""
+        agent = Agent(mock_model, registry)
+        prompt = agent.conversation.messages[0].content
+        assert "# Role" in prompt
+        assert "# Instructions" in prompt
+        assert "# Tool Usage Rules" in prompt
+        assert "# Reasoning" in prompt
+        assert "# Guardrails" in prompt
+        assert "# Output Format" in prompt
+
+    @pytest.mark.asyncio
+    async def test_rag_context_injected_when_manager_provided(self, mock_model, registry):
+        """When a RAG manager is provided, its context should be injected."""
+        mock_rag = MagicMock()
+        mock_rag.get_context.return_value = "Relevant knowledge about SAP data."
+
+        mock_response = MagicMock()
+        mock_response.content = "Here is the answer."
+        mock_response.tool_calls = None
+        mock_response.invalid_tool_calls = []
+        mock_model.ainvoke = AsyncMock(return_value=mock_response)
+        mock_model.bind_tools = MagicMock(return_value=mock_model)
+
+        agent = Agent(mock_model, registry, rag_manager=mock_rag)
+        await agent.process("Tell me about data")
+
+        mock_rag.get_context.assert_called_once_with("Tell me about data", k=3)
+        # RAG context should appear as a system message in the conversation
+        rag_messages = [
+            m
+            for m in agent.conversation.messages
+            if m.role.value == "system" and "Relevant Knowledge" in m.content
+        ]
+        assert len(rag_messages) == 1
+        assert "Relevant knowledge about SAP data." in rag_messages[0].content
+
+    @pytest.mark.asyncio
+    async def test_no_rag_context_when_manager_not_provided(self, mock_model, registry):
+        """When no RAG manager is provided, no RAG context should be injected."""
+        mock_response = MagicMock()
+        mock_response.content = "Here is the answer."
+        mock_response.tool_calls = None
+        mock_response.invalid_tool_calls = []
+        mock_model.ainvoke = AsyncMock(return_value=mock_response)
+        mock_model.bind_tools = MagicMock(return_value=mock_model)
+
+        agent = Agent(mock_model, registry)
+        await agent.process("Tell me about data")
+
+        # Only one system message (the base prompt), no RAG context
+        system_messages = [
+            m for m in agent.conversation.messages if m.role.value == "system"
+        ]
+        assert len(system_messages) == 1
+
+    @pytest.mark.asyncio
+    async def test_rag_failure_does_not_break_agent(self, mock_model, registry):
+        """If RAG retrieval fails, the agent should continue normally."""
+        mock_rag = MagicMock()
+        mock_rag.get_context.side_effect = RuntimeError("DB connection failed")
+
+        mock_response = MagicMock()
+        mock_response.content = "Here is the answer."
+        mock_response.tool_calls = None
+        mock_response.invalid_tool_calls = []
+        mock_model.ainvoke = AsyncMock(return_value=mock_response)
+        mock_model.bind_tools = MagicMock(return_value=mock_model)
+
+        agent = Agent(mock_model, registry, rag_manager=mock_rag)
+        response = await agent.process("Tell me about data")
+
+        assert response.finished is True
+        assert response.content == "Here is the answer."

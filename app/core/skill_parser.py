@@ -129,6 +129,7 @@ def _build_instructions(sections: dict[str, str]) -> str:
     """Build system prompt instructions from parsed sections.
 
     Combines relevant sections into a coherent instruction block.
+    Examples are included at the end to serve as few-shot demonstrations.
     """
     parts = []
 
@@ -147,6 +148,10 @@ def _build_instructions(sections: dict[str, str]) -> str:
     # Add when to use as context
     if "when to use" in sections:
         parts.append(f"## When to Use\n{sections['when to use']}")
+
+    # Add examples as few-shot demonstrations
+    if "examples" in sections:
+        parts.append(f"## Examples\n{sections['examples']}")
 
     return "\n\n".join(parts)
 

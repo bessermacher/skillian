@@ -41,7 +41,38 @@ Activate this skill when the user asks about:
 
 ## Examples
 
-### Example 1: Basic Check
+<examples>
 
+<example>
 User: "Is company code 1000 in scope for period 2024001?"
-Assistant: Uses check_ownership tool with FISCPER='2024001' and ZCOMPCODE=1000...
+
+Tool call:
+```
+check_ownership(param_fiscper="2024001", param_cocd="1000")
+```
+
+Tool result:
+```json
+{"result": true, "rows_found": 3}
+```
+
+Response: "Yes, company code 1000 IS in scope for January 2024 (period 2024001). It was found in 3 scope/version combinations."
+</example>
+
+<example>
+User: "Check if company 5500 is in ownership for December 2024"
+
+Tool call:
+```
+check_ownership(param_fiscper="2024012", param_cocd="5500")
+```
+
+Tool result:
+```json
+{"result": false, "rows_found": 0}
+```
+
+Response: "No, company code 5500 is NOT in scope for December 2024 (period 2024012). No matching ownership records were found. This company may have been removed from the consolidation scope for this period."
+</example>
+
+</examples>

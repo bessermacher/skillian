@@ -116,12 +116,14 @@ def get_agent() -> Agent:
     settings = get_settings()
     chat_model = get_chat_model()
     registry = get_skill_registry()
+    rag_manager = get_rag_manager()
     return Agent(
         chat_model,
         registry,
         max_iterations=settings.max_iterations,
         llm_timeout=settings.llm_timeout,
         tool_timeout=settings.tool_timeout,
+        rag_manager=rag_manager,
     )
 
 

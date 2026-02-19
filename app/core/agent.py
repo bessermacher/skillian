@@ -1,5 +1,7 @@
 """Main agent orchestration."""
 
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
@@ -7,7 +9,7 @@ import re
 import time
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
@@ -21,6 +23,9 @@ from langchain_core.messages import (
 from app.core.messages import Conversation, Message, MessageRole
 from app.core.playbook import InvestigationPlaybook
 from app.core.registry import SkillRegistry
+
+if TYPE_CHECKING:
+    from app.rag import RAGManager
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +80,7 @@ class Agent:
         max_iterations: int = 15,
         llm_timeout: float = 120.0,
         tool_timeout: float = 60.0,
+        rag_manager: RAGManager | None = None,
     ):
         """Initialize the agent.
 
@@ -84,11 +90,13 @@ class Agent:
             max_iterations: Maximum tool call iterations to prevent loops.
             llm_timeout: Timeout in seconds for each LLM call.
             tool_timeout: Timeout in seconds for each tool execution.
+            rag_manager: Optional RAG manager for context retrieval.
         """
         self.registry = registry
         self.max_iterations = max_iterations
         self.llm_timeout = llm_timeout
         self.tool_timeout = tool_timeout
+        self._rag_manager = rag_manager
         self.conversation = Conversation()
 
         # Cache tool names for O(1) lookups
@@ -110,8 +118,12 @@ class Agent:
 
     def _setup_system_prompt(self) -> None:
         """Set up the system prompt with skill context."""
-        base_prompt = """You are Skillian, an AI assistant specialized in \
-diagnosing SAP BW data issues.
+        base_prompt = """\
+# Role
+
+You are Skillian, an AI assistant specialized in diagnosing SAP BW data issues.
+
+# Instructions
 
 You have access to tools that can query SAP BW data. Use these tools to help users:
 - Analyze financial data (cost centers, profit centers, budgets)
@@ -121,19 +133,58 @@ You have access to tools that can query SAP BW data. Use these tools to help use
 When asked about data, use the appropriate tools to fetch real information.
 Be concise and accurate in your responses.
 
-IMPORTANT: Always proceed with the full diagnostic autonomously. Do NOT ask \
-the user for confirmation between steps. Call all necessary tools in sequence \
-and present the final findings when done.
+# Tool Usage Rules
 
-When investigating data issues, you MUST execute every playbook step by calling \
+- Always proceed with the full diagnostic autonomously. Do NOT ask the user for \
+confirmation between steps.
+- Call all necessary tools in sequence and present the final findings when done.
+- When investigating data issues, you MUST execute every playbook step by calling \
 the appropriate tools. Do NOT stop after a single tool call to summarize or \
 explain — complete the entire investigation workflow via tool calls first, then \
 present the final summary as text.
+- If unsure about a parameter value, use your tools to gather information rather \
+than guessing.
+
+# Reasoning
+
+Before each tool call, briefly consider:
+- Whether all required parameters are available from the user's query or previous tool results
+- Which tool is the correct next step in the workflow
+
+After each tool result, reflect on what the result means before proceeding to \
+the next step.
+
+# Guardrails
+
+- NEVER fabricate filter values (company codes, periods, versions). Use only \
+values from the user's query or previous tool results.
+- NEVER call check_data_availability without specifying a table name.
+- If the user's request is ambiguous about which company code, period, or version, \
+ask for clarification before starting an investigation.
+- Do NOT call start_investigation for questions that are not about data issues \
+(e.g., general SAP questions, explanations of terminology).
+- If a tool returns an error, report it clearly to the user — do NOT retry with \
+made-up parameters.
+
+# Output Format
+
+When presenting investigation results, use this structure:
+
+**Problem:** One-sentence description of the reported issue.
+
+**Findings:**
+1. [NORMAL|ISSUE|CHECK] Finding description with exact values from tool results.
+2. ...
+
+**Root Cause:** Identified root cause, or "Undetermined — further investigation needed."
+
+**Recommended Actions:**
+- Specific next steps for the user.
 """
         skill_context = self.registry.get_combined_system_prompt()
 
         if skill_context:
-            full_prompt = f"{base_prompt}\n\n{skill_context}"
+            full_prompt = f"{base_prompt}\n# Skill Domains\n\n{skill_context}"
         else:
             full_prompt = base_prompt
 
@@ -398,6 +449,21 @@ present the final summary as text.
         The final event is always ``"done"``.
         """
         request_start = time.perf_counter()
+
+        # Inject RAG context before the user message (first query only)
+        if self._rag_manager is not None:
+            try:
+                rag_context = self._rag_manager.get_context(user_message, k=3)
+                if rag_context:
+                    self.conversation.add(
+                        Message.system(
+                            f"# Relevant Knowledge\n\n{rag_context}\n\n"
+                            "Use the above context to inform your response."
+                        )
+                    )
+            except Exception:
+                logger.warning("RAG context retrieval failed", exc_info=True)
+
         self.conversation.add_user(user_message)
 
         tool_calls_made: list[dict[str, Any]] = []
