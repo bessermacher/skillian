@@ -53,7 +53,6 @@ class DatasphereConnector:
     _connection: dbapi.Connection | None = field(default=None, init=False, repr=False)
     _executor: ThreadPoolExecutor | None = field(default=None, init=False, repr=False)
 
-
     async def connect(self) -> None:
         """Initialize the database connection."""
         if self._connection is not None:
@@ -214,9 +213,7 @@ class DatasphereConnector:
         """
         return await self.execute_sql(query)
 
-    async def get_columns(
-        self, table_name: str, schema: str | None = None
-    ) -> list[dict[str, Any]]:
+    async def get_columns(self, table_name: str, schema: str | None = None) -> list[dict[str, Any]]:
         """Get column metadata for a table.
 
         Args:

@@ -6,8 +6,9 @@ import asyncio
 import functools
 import importlib
 import inspect
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field, create_model
@@ -106,89 +107,50 @@ def _build_tool(
     )
 
 
+def _build_field(
+    param_config: dict[str, Any],
+    *,
+    required: bool = False,
+    parent_name: str = "",
+) -> tuple[type, Any]:
+    """Build a single Pydantic (annotation, Field) tuple from a parameter config."""
+    description = param_config.get("description", "")
+    default = param_config.get("default")
+
+    # Handle nested objects recursively
+    if param_config.get("type") == "object" and "properties" in param_config:
+        nested = _build_input_schema(
+            parent_name,
+            [{"name": k, **v} for k, v in param_config["properties"].items()],
+        )
+        if required:
+            return (nested, Field(description=description))
+        return (nested | None, Field(default=None, description=description))
+
+    param_type = _get_python_type(param_config.get("type", "string"))
+
+    if required:
+        return (param_type, Field(description=description))
+    if default is not None:
+        return (param_type, Field(default=default, description=description))
+    return (param_type | None, Field(default=None, description=description))
+
+
 def _build_input_schema(
     tool_name: str,
     parameters: list[dict[str, Any]],
 ) -> type[BaseModel]:
-    """Build a Pydantic model from parameter definitions.
-
-    Args:
-        tool_name: Name of the tool (for model naming)
-        parameters: List of parameter configs
-
-    Returns:
-        Pydantic BaseModel class
-    """
-    # Build field definitions
-    fields: dict[str, tuple[type, Any]] = {}
-
-    for param in parameters:
-        param_name = param["name"]
-        param_type = _get_python_type(param.get("type", "string"))
-        required = param.get("required", False)
-        description = param.get("description", "")
-        default = param.get("default")
-
-        # Handle nested objects
-        if param.get("type") == "object" and "properties" in param:
-            nested_schema = _build_nested_schema(
-                f"{tool_name}_{param_name}",
-                param["properties"],
-            )
-            if required:
-                fields[param_name] = (nested_schema, Field(description=description))
-            else:
-                fields[param_name] = (
-                    nested_schema | None,
-                    Field(default=None, description=description),
-                )
-            continue
-
-        # Build field
-        if required:
-            fields[param_name] = (param_type, Field(description=description))
-        elif default is not None:
-            fields[param_name] = (param_type, Field(default=default, description=description))
-        else:
-            fields[param_name] = (
-                param_type | None,
-                Field(default=None, description=description),
-            )
-
-    # Create dynamic model
+    """Build a Pydantic model from parameter definitions."""
+    fields = {
+        param["name"]: _build_field(
+            param,
+            required=param.get("required", False),
+            parent_name=f"{tool_name}_{param['name']}",
+        )
+        for param in parameters
+    }
     model_name = "".join(word.capitalize() for word in tool_name.split("_")) + "Input"
     return create_model(model_name, **fields)
-
-
-def _build_nested_schema(
-    name: str,
-    properties: dict[str, Any],
-) -> type[BaseModel]:
-    """Build a nested Pydantic model from properties.
-
-    Args:
-        name: Model name
-        properties: Property definitions
-
-    Returns:
-        Pydantic BaseModel class
-    """
-    fields: dict[str, tuple[type, Any]] = {}
-
-    for prop_name, prop_config in properties.items():
-        prop_type = _get_python_type(prop_config.get("type", "string"))
-        description = prop_config.get("description", "")
-        default = prop_config.get("default")
-
-        if default is not None:
-            fields[prop_name] = (prop_type, Field(default=default, description=description))
-        else:
-            fields[prop_name] = (
-                prop_type | None,
-                Field(default=None, description=description),
-            )
-
-    return create_model(name, **fields)
 
 
 def _get_python_type(type_str: str) -> type:
@@ -339,116 +301,3 @@ def _build_query_function(
             return {"error": str(e), "query": query}
 
     return execute_query
-
-
-# Utility function for validation
-def validate_tools_yaml(yaml_path: Path | str) -> dict[str, Any]:
-    """Validate a tools.yaml file without loading implementations.
-
-    Args:
-        yaml_path: Path to tools.yaml
-
-    Returns:
-        Dict with 'valid', 'errors', 'warnings' keys
-    """
-    yaml_path = Path(yaml_path)
-    errors = []
-    warnings = []
-
-    if not yaml_path.exists():
-        return {
-            "valid": False,
-            "errors": [f"File not found: {yaml_path}"],
-            "warnings": [],
-        }
-
-    try:
-        content = yaml.safe_load(yaml_path.read_text())
-    except yaml.YAMLError as e:
-        return {
-            "valid": False,
-            "errors": [f"Invalid YAML: {e}"],
-            "warnings": [],
-        }
-
-    if not isinstance(content, dict):
-        errors.append("Root must be a dictionary")
-        return {"valid": False, "errors": errors, "warnings": warnings}
-
-    if "tools" not in content:
-        errors.append("Missing 'tools' key")
-        return {"valid": False, "errors": errors, "warnings": warnings}
-
-    tools = content["tools"]
-    if not isinstance(tools, list):
-        errors.append("'tools' must be a list")
-        return {"valid": False, "errors": errors, "warnings": warnings}
-
-    seen_names = set()
-    for i, tool in enumerate(tools):
-        # Check name
-        if "name" not in tool:
-            errors.append(f"Tool at index {i} missing 'name'")
-            continue
-
-        name = tool["name"]
-        if name in seen_names:
-            errors.append(f"Duplicate tool name: '{name}'")
-        seen_names.add(name)
-
-        # Check description
-        if "description" not in tool:
-            warnings.append(f"Tool '{name}' missing description")
-
-        # Check implementation or query_template
-        has_impl = "implementation" in tool
-        has_query = "query_template" in tool
-
-        if not has_impl and not has_query:
-            errors.append(
-                f"Tool '{name}' needs 'implementation' or 'query_template'"
-            )
-
-        if has_impl and has_query:
-            warnings.append(f"Tool '{name}' has both implementation and query_template")
-
-        # Validate parameters
-        params = tool.get("parameters", [])
-        if not isinstance(params, list):
-            errors.append(f"Tool '{name}' parameters must be a list")
-            continue
-
-        param_names = set()
-        for param in params:
-            if "name" not in param:
-                errors.append(f"Tool '{name}' has parameter without name")
-                continue
-
-            pname = param["name"]
-            if pname in param_names:
-                errors.append(f"Tool '{name}' has duplicate parameter: '{pname}'")
-            param_names.add(pname)
-
-            # Check type
-            ptype = param.get("type", "string")
-            valid_types = {
-                "string",
-                "integer",
-                "int",
-                "number",
-                "float",
-                "boolean",
-                "bool",
-                "array",
-                "list",
-                "object",
-                "dict",
-            }
-            if ptype.lower() not in valid_types:
-                warnings.append(f"Tool '{name}' parameter '{pname}' has unusual type: '{ptype}'")
-
-    return {
-        "valid": len(errors) == 0,
-        "errors": errors,
-        "warnings": warnings,
-    }

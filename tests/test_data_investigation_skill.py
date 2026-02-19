@@ -37,11 +37,14 @@ def skill(skill_loader):
 
 @pytest.fixture(autouse=True)
 def reset_investigation_state():
-    """Reset module-level investigation state between tests."""
-    investigation_tools._current_investigation = None
+    """Reset investigation state between tests.
+
+    _current_investigation is now a ContextVar; use .set() to reset it.
+    """
+    investigation_tools._current_investigation.set(None)
     skills_common._connector = None
     yield
-    investigation_tools._current_investigation = None
+    investigation_tools._current_investigation.set(None)
     skills_common._connector = None
 
 

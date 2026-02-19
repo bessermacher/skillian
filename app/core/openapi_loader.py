@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field, create_model
@@ -44,7 +45,7 @@ class OpenAPISpec:
     schemas: dict[str, Any]
 
     @classmethod
-    def from_file(cls, path: Path | str) -> "OpenAPISpec":
+    def from_file(cls, path: Path | str) -> OpenAPISpec:
         """Load OpenAPI spec from file."""
         path = Path(path)
 
@@ -63,7 +64,7 @@ class OpenAPISpec:
         return cls.from_dict(data)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "OpenAPISpec":
+    def from_dict(cls, data: dict[str, Any]) -> OpenAPISpec:
         """Parse OpenAPI spec from dictionary."""
         info = data.get("info", {})
 
@@ -80,13 +81,10 @@ class OpenAPISpec:
                 endpoint = OpenAPIEndpoint(
                     path=path,
                     method=method.upper(),
-                    operation_id=operation.get(
-                        "operationId", _generate_operation_id(path, method)
-                    ),
+                    operation_id=operation.get("operationId", _generate_operation_id(path, method)),
                     summary=operation.get("summary", ""),
                     description=operation.get("description", ""),
-                    parameters=operation.get("parameters", [])
-                    + path_item.get("parameters", []),
+                    parameters=operation.get("parameters", []) + path_item.get("parameters", []),
                     request_body=operation.get("requestBody"),
                     responses=operation.get("responses", {}),
                     tags=operation.get("tags", []),

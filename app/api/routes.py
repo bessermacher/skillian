@@ -21,8 +21,9 @@ from app.api.schemas import (
     SkillsResponse,
     ToolCall,
 )
-from app.api.sessions import SessionStore
+from app.api.sessions import Session, SessionStore
 from app.config import get_settings
+from app.core.agent import AgentResponse
 from app.dependencies import (
     get_business_connector,
     get_llm_provider,
@@ -37,7 +38,43 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+# ------------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------------
+
+
+def _build_chat_response(result: AgentResponse, session: Session) -> ChatResponse:
+    """Convert an AgentResponse into a ChatResponse schema."""
+    return ChatResponse(
+        response=result.content,
+        tool_calls=[
+            ToolCall(
+                tool=tc["tool"],
+                args=tc["args"],
+                result=tc["result"],
+                duration_seconds=tc.get("duration_seconds"),
+            )
+            for tc in result.tool_calls_made
+        ],
+        session_id=session.session_id,
+        finished=result.finished,
+        timing=result.timing or None,
+    )
+
+
+async def _process_chat(
+    session: Session, message: str, session_store: SessionStore
+) -> ChatResponse:
+    """Process a message, update session, and return a ChatResponse."""
+    result = await session.agent.process(message)
+    session.increment_messages()
+    await session_store.update(session)
+    return _build_chat_response(result, session)
+
+
+# ------------------------------------------------------------------
 # Health & Info
+# ------------------------------------------------------------------
 
 
 @router.get(
@@ -86,20 +123,22 @@ async def health_check() -> HealthResponse:
 async def list_skills() -> SkillsResponse:
     """List all registered skills and their tools."""
     registry = get_skill_registry()
-    skills = []
-    for skill in registry.get_all_skills():
-        skills.append(
+    return SkillsResponse(
+        skills=[
             SkillInfo(
                 name=skill.name,
                 description=skill.description,
                 tools=[{"name": t.name, "description": t.description} for t in skill.tools],
                 knowledge_paths=skill.knowledge_paths,
             )
-        )
-    return SkillsResponse(skills=skills)
+            for skill in registry.get_all_skills()
+        ]
+    )
 
 
+# ------------------------------------------------------------------
 # Chat
+# ------------------------------------------------------------------
 
 
 @router.post(
@@ -119,7 +158,6 @@ async def chat(
     Always returns session_id for conversation continuity.
     """
     try:
-        # Get existing session or create new one
         session = None
         if request.session_id:
             session = await session_store.get(request.session_id)
@@ -130,26 +168,7 @@ async def chat(
             session = await session_store.create()
             logger.info("Created new session %s", session.session_id)
 
-        # Process message with session's agent
-        result = await session.agent.process(request.message)
-        session.increment_messages()
-        await session_store.update(session)
-
-        return ChatResponse(
-            response=result.content,
-            tool_calls=[
-                ToolCall(
-                    tool=tc["tool"],
-                    args=tc["args"],
-                    result=tc["result"],
-                    duration_seconds=tc.get("duration_seconds"),
-                )
-                for tc in result.tool_calls_made
-            ],
-            session_id=session.session_id,
-            finished=result.finished,
-            timing=result.timing or None,
-        )
+        return await _process_chat(session, request.message, session_store)
     except Exception:
         logger.exception("Chat processing failed for message: %s...", request.message[:50])
         raise HTTPException(
@@ -202,7 +221,9 @@ async def chat_stream(
     )
 
 
+# ------------------------------------------------------------------
 # Sessions
+# ------------------------------------------------------------------
 
 
 @router.post(
@@ -217,25 +238,7 @@ async def create_session_and_chat(
     """Create a new session and process the first message."""
     try:
         session = await session_store.create()
-        result = await session.agent.process(request.message)
-        session.increment_messages()
-        await session_store.update(session)
-
-        return ChatResponse(
-            response=result.content,
-            tool_calls=[
-                ToolCall(
-                    tool=tc["tool"],
-                    args=tc["args"],
-                    result=tc["result"],
-                    duration_seconds=tc.get("duration_seconds"),
-                )
-                for tc in result.tool_calls_made
-            ],
-            session_id=session.session_id,
-            finished=result.finished,
-            timing=result.timing or None,
-        )
+        return await _process_chat(session, request.message, session_store)
     except Exception:
         logger.exception("Failed to create session and process message")
         raise HTTPException(
@@ -261,25 +264,7 @@ async def session_chat(
         raise HTTPException(status_code=404, detail="Session not found")
 
     try:
-        result = await session.agent.process(request.message)
-        session.increment_messages()
-        await session_store.update(session)
-
-        return ChatResponse(
-            response=result.content,
-            tool_calls=[
-                ToolCall(
-                    tool=tc["tool"],
-                    args=tc["args"],
-                    result=tc["result"],
-                    duration_seconds=tc.get("duration_seconds"),
-                )
-                for tc in result.tool_calls_made
-            ],
-            session_id=session.session_id,
-            finished=result.finished,
-            timing=result.timing or None,
-        )
+        return await _process_chat(session, request.message, session_store)
     except Exception:
         logger.exception("Failed to process message in session %s", session_id)
         raise HTTPException(
@@ -325,7 +310,9 @@ async def delete_session(
     return {"status": "deleted", "session_id": session_id}
 
 
+# ------------------------------------------------------------------
 # Knowledge
+# ------------------------------------------------------------------
 
 
 @router.post(

@@ -123,7 +123,12 @@ class TestCheckOwnership:
         mock_connector.execute_sql = AsyncMock(
             return_value=[
                 {"FISCPER": "2024012", "ZCOMPCODE": "1110", "ZSCOPE": "S_LEGAL", "ZVERSION": "001"},
-                {"FISCPER": "2024012", "ZCOMPCODE": "1110", "ZSCOPE": "S_LEGAL_DKK", "ZVERSION": "001"},
+                {
+                    "FISCPER": "2024012",
+                    "ZCOMPCODE": "1110",
+                    "ZSCOPE": "S_LEGAL_DKK",
+                    "ZVERSION": "001",
+                },
                 {"FISCPER": "2024012", "ZCOMPCODE": "1110", "ZSCOPE": "S_LEGAL", "ZVERSION": "021"},
             ]
         )
@@ -208,9 +213,7 @@ class TestCheckOwnership:
 
     @pytest.mark.asyncio
     async def test_sql_error_handling(self, mock_connector):
-        mock_connector.execute_sql = AsyncMock(
-            side_effect=DatasphereQueryError("Connection lost")
-        )
+        mock_connector.execute_sql = AsyncMock(side_effect=DatasphereQueryError("Connection lost"))
 
         result = await ownership_tools.check_ownership(
             param_fiscper="2024012",

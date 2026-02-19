@@ -16,6 +16,7 @@ from app.core import SkillRegistry, Tool
 def reset_db_connection():
     """Reset database connection between tests to avoid event loop issues."""
     import app.db.connection as db_conn
+
     # Reset the global state before each test
     db_conn._engine = None
     db_conn._async_session_factory = None
@@ -26,6 +27,7 @@ def reset_db_connection():
 
 
 # Settings Fixtures
+
 
 @pytest.fixture
 def test_settings() -> Settings:
@@ -41,8 +43,10 @@ def test_settings() -> Settings:
 
 # Tool/Skill Fixtures
 
+
 class SimpleInput(BaseModel):
     """Simple input for test tools."""
+
     value: str
 
 
@@ -127,6 +131,7 @@ def skill_registry(test_skill: TestSkill) -> SkillRegistry:
 
 # LLM Mocks
 
+
 @pytest.fixture
 def mock_chat_model() -> MagicMock:
     """Mock LangChain chat model."""
@@ -151,9 +156,7 @@ def mock_chat_model_with_tool_call() -> MagicMock:
     # First response: tool call
     tool_response = MagicMock()
     tool_response.content = ""
-    tool_response.tool_calls = [
-        {"id": "call_1", "name": "simple_tool", "args": {"value": "test"}}
-    ]
+    tool_response.tool_calls = [{"id": "call_1", "name": "simple_tool", "args": {"value": "test"}}]
 
     # Second response: final answer
     final_response = MagicMock()
@@ -168,15 +171,18 @@ def mock_chat_model_with_tool_call() -> MagicMock:
 
 # API Fixtures
 
+
 @pytest.fixture
 def client() -> Generator[TestClient]:
     """FastAPI test client."""
     from main import app
+
     with TestClient(app) as client:
         yield client
 
 
 # Temp Directory Fixtures
+
 
 @pytest.fixture
 def temp_dir() -> Generator[str]:
@@ -186,6 +192,7 @@ def temp_dir() -> Generator[str]:
 
 
 # Mock Embeddings
+
 
 class MockEmbeddings:
     """Mock embeddings for testing without real models."""

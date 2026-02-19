@@ -138,9 +138,7 @@ async def check_data_availability(
 
     # Build aggregation: use configured measures if available, else COUNT(*)
     if measures:
-        agg_parts = [
-            f'{m.aggregation.upper()}("{m.column}") as "{m.column}"' for m in measures
-        ]
+        agg_parts = [f'{m.aggregation.upper()}("{m.column}") as "{m.column}"' for m in measures]
         agg_clause = ", ".join(agg_parts)
     else:
         agg_clause = 'COUNT(*) as "ROW_COUNT"'
@@ -171,7 +169,12 @@ FROM "{schema}"."{table}"
 {group_clause}
 """.strip()
 
-    logger.info("check_data_availability: table=%s filters=%s group_by=%s", table, filters, group_by)
+    logger.info(
+        "check_data_availability: table=%s filters=%s group_by=%s",
+        table,
+        filters,
+        group_by,
+    )
     logger.debug("check_data_availability: query=\n%s", query)
 
     try:
@@ -188,7 +191,9 @@ FROM "{schema}"."{table}"
 
         logger.info(
             "check_data_availability: data_found=%s totals=%s group_count=%d",
-            data_found, totals, len(results),
+            data_found,
+            totals,
+            len(results),
         )
         for row in results[:3]:
             logger.debug("check_data_availability: sample_row=%s", row)

@@ -1,7 +1,8 @@
 """Tests for custom OpenAI provider."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 from app.llm.custom_openai import CustomOpenAIProvider
 
@@ -27,7 +28,7 @@ def test_get_chat_model(custom_provider):
     with patch("app.llm.custom_openai.ChatOpenAI") as mock_chat:
         mock_chat.return_value = MagicMock()
 
-        model = custom_provider.get_chat_model()
+        custom_provider.get_chat_model()
 
         mock_chat.assert_called_once_with(
             api_key="test-key",
@@ -42,8 +43,8 @@ def test_get_chat_model(custom_provider):
 
 def test_factory_creates_custom_provider():
     """Test factory creates custom provider with correct settings."""
-    from app.llm.factory import create_llm_provider
     from app.config import Settings
+    from app.llm.factory import create_llm_provider
 
     settings = Settings(
         llm_provider="custom_openai",

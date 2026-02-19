@@ -96,10 +96,14 @@ async def lifespan(app: FastAPI):
 settings = get_settings()
 
 # Configure CORS based on environment
-allowed_origins = ["*"] if settings.is_development else [
-    # Add production origins here, e.g.:
-    # "https://skillian.example.com",
-]
+allowed_origins = (
+    ["*"]
+    if settings.is_development
+    else [
+        # Add production origins here, e.g.:
+        # "https://skillian.example.com",
+    ]
+)
 
 app = FastAPI(
     title=settings.app_name,

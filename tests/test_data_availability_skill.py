@@ -533,9 +533,7 @@ class TestCheckDataAvailability:
     async def test_error_result_structure(self, mock_connector):
         from app.connectors.datasphere import DatasphereQueryError
 
-        mock_connector.execute_sql = AsyncMock(
-            side_effect=DatasphereQueryError("timeout")
-        )
+        mock_connector.execute_sql = AsyncMock(side_effect=DatasphereQueryError("timeout"))
 
         result = await availability_tools.check_data_availability(
             table="CV_ZBC_AA61",

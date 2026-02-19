@@ -1,5 +1,6 @@
 """Main agent orchestration."""
 
+import asyncio
 import json
 import logging
 import re
@@ -18,6 +19,7 @@ from langchain_core.messages import (
 )
 
 from app.core.messages import Conversation, Message, MessageRole
+from app.core.playbook import InvestigationPlaybook
 from app.core.registry import SkillRegistry
 
 logger = logging.getLogger(__name__)
@@ -56,7 +58,7 @@ class Agent:
 
     The agent:
     1. Binds all skill tools to the LLM
-    2. Processes user messages
+    2. Processes user messages via a unified event loop
     3. Executes tool calls when requested by LLM
     4. Returns responses to the user
 
@@ -71,6 +73,8 @@ class Agent:
         chat_model: BaseChatModel,
         registry: SkillRegistry,
         max_iterations: int = 15,
+        llm_timeout: float = 120.0,
+        tool_timeout: float = 60.0,
     ):
         """Initialize the agent.
 
@@ -78,18 +82,28 @@ class Agent:
             chat_model: LangChain chat model to use.
             registry: Skill registry with available tools.
             max_iterations: Maximum tool call iterations to prevent loops.
+            llm_timeout: Timeout in seconds for each LLM call.
+            tool_timeout: Timeout in seconds for each tool execution.
         """
         self.registry = registry
         self.max_iterations = max_iterations
+        self.llm_timeout = llm_timeout
+        self.tool_timeout = tool_timeout
         self.conversation = Conversation()
 
-        # Bind tools to the model
+        # Cache tool names for O(1) lookups
         tools = registry.get_all_tools()
+        self._tool_names: frozenset[str] = frozenset(t.name for t in tools)
+
+        # Bind tools to the model
         if tools:
             langchain_tools = [t.to_langchain_tool() for t in tools]
             self.model = chat_model.bind_tools(langchain_tools)
         else:
             self.model = chat_model
+
+        # Investigation playbook for deterministic auto-chaining
+        self._playbook = InvestigationPlaybook()
 
         # Set up system prompt
         self._setup_system_prompt()
@@ -152,62 +166,49 @@ present the final summary as text.
     async def _execute_tool(self, tool_name: str, tool_args: dict[str, Any]) -> str:
         """Execute a tool and return the result as a string.
 
-        Args:
-            tool_name: Name of the tool to execute.
-            tool_args: Arguments for the tool.
-
-        Returns:
-            Tool result as a JSON string.
+        Includes timeout protection and structured error logging.
         """
         try:
             tool = self.registry.get_tool(tool_name)
-            result = await tool.aexecute(**tool_args)
+            result = await asyncio.wait_for(
+                tool.aexecute(**tool_args),
+                timeout=self.tool_timeout,
+            )
 
-            # Convert result to JSON string for LLM
             if isinstance(result, str):
                 return result
-            return json.dumps(result, indent=2, default=str)
+            return json.dumps(result, separators=(",", ":"), default=str)
 
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        except TimeoutError:
+            logger.error(
+                "Tool '%s' timed out after %.1fs (args: %s)",
+                tool_name,
+                self.tool_timeout,
+                tool_args,
+            )
+            return json.dumps({"error": f"Tool execution timed out after {self.tool_timeout}s"})
+
+        except Exception:
+            logger.exception("Tool '%s' execution failed (args: %s)", tool_name, tool_args)
+            return json.dumps({"error": f"Tool '{tool_name}' failed unexpectedly"})
 
     def _mentions_tools(self, content: str) -> bool:
-        """Check if text response mentions registered tool names.
-
-        Used to detect when the LLM describes calling a tool instead of
-        actually invoking it via the structured tool calling mechanism.
-        """
+        """Check if text response mentions registered tool names."""
         if not content:
             return False
-
-        known_tools = {t.name for t in self.registry.get_all_tools()}
         content_lower = content.lower()
-        return any(tool_name in content_lower for tool_name in known_tools)
+        return any(tool_name in content_lower for tool_name in self._tool_names)
 
     def _looks_like_tool_calls(self, content: str) -> bool:
-        """Detect if LLM response text contains tool call JSON instead of proper tool_calls.
-
-        Looks for patterns like {"name": "tool_name", ...} where tool_name
-        matches a registered tool.
-        """
-        if not content:
+        """Detect if LLM response text contains tool call JSON."""
+        if not content or not self._tool_names:
             return False
-
-        known_tools = {t.name for t in self.registry.get_all_tools()}
-        if not known_tools:
-            return False
-
         pattern = r'\{\s*"name"\s*:\s*"([^"]+)"'
         matches = re.findall(pattern, content)
-        return any(match in known_tools for match in matches)
+        return any(match in self._tool_names for match in matches)
 
     def _investigation_incomplete(self, tool_calls_made: list[dict[str, Any]]) -> bool:
-        """Check if an investigation was started but not completed.
-
-        Returns True when start_investigation was called but
-        get_investigation_summary was not, meaning the LLM is trying
-        to respond with text before completing the workflow.
-        """
+        """Check if an investigation was started but not completed."""
         tools_called = {tc["tool"] for tc in tool_calls_made}
         return (
             "start_investigation" in tools_called
@@ -215,29 +216,13 @@ present the final summary as text.
         )
 
     def _investigation_completed(self, tool_calls_made: list[dict[str, Any]]) -> bool:
-        """Check if an investigation workflow was fully completed.
-
-        Returns True when both start_investigation and
-        get_investigation_summary were called. Used to suppress
-        the _mentions_tools nudge on the final summary text,
-        which naturally references tool names.
-        """
+        """Check if an investigation workflow was fully completed."""
         tools_called = {tc["tool"] for tc in tool_calls_made}
-        return (
-            "start_investigation" in tools_called
-            and "get_investigation_summary" in tools_called
-        )
+        return "start_investigation" in tools_called and "get_investigation_summary" in tools_called
 
     @staticmethod
     def _extract_content(response: AIMessage) -> str:
-        """Extract text content from an LLM response with provider fallbacks.
-
-        Handles quirks across providers:
-        - Primary: response.content (string)
-        - Fallback: list-type content blocks (Anthropic format)
-        - Fallback: response.additional_kwargs.message.content (Ollama)
-        - Fallback: response.additional_kwargs.content (generic)
-        """
+        """Extract text content from an LLM response with provider fallbacks."""
         # Primary: string content
         if isinstance(response.content, str) and response.content.strip():
             return response.content
@@ -270,12 +255,7 @@ present the final summary as text.
 
     @staticmethod
     def _build_summarise_nudge(tool_calls_made: list[dict[str, Any]]) -> str:
-        """Build a nudge that includes actual tool results for the LLM to summarise.
-
-        Used when the LLM returns empty content after tool calls.
-        Including the tool results inline prevents the model from
-        hallucinating on retry.
-        """
+        """Build a nudge that includes actual tool results for the LLM to summarise."""
         parts = [
             "Your previous response was empty. Here are the tool results you "
             "need to summarise for the user:\n"
@@ -293,349 +273,54 @@ present the final summary as text.
         return "\n".join(parts)
 
     def _investigation_started(self, tool_calls_made: list[dict[str, Any]]) -> bool:
-        """Check if start_investigation was called.
-
-        Used to scope the _mentions_tools nudge so it only triggers
-        during investigation workflows, not simple data checks.
-        """
+        """Check if start_investigation was called."""
         return any(tc["tool"] == "start_investigation" for tc in tool_calls_made)
 
-    _LEGAL_SCOPES = {"S_LEGAL", "S_LEGAL_DKK", "S_LEGAL_SPECIAL"}
-
-    @staticmethod
-    def _format_totals_with_currency(
-        totals: dict[str, Any], groups: list[dict[str, Any]],
-    ) -> str:
-        """Format totals dict with currency codes extracted from group data."""
-        lc_currencies = {g.get("CURKEY_LC") for g in groups if g.get("CURKEY_LC")}
-        gc_currencies = {g.get("CURKEY_GC") for g in groups if g.get("CURKEY_GC")}
-
-        lc_label = ", ".join(sorted(lc_currencies)) if lc_currencies else "LC"
-        gc_label = ", ".join(sorted(gc_currencies)) if gc_currencies else "GC"
-
-        parts: list[str] = []
-        if "CS_TRN_LC" in totals:
-            parts.append(f"LC: {totals['CS_TRN_LC']:,.2f} {lc_label}")
-        if "CS_TRN_GC" in totals:
-            parts.append(f"GC: {totals['CS_TRN_GC']:,.2f} {gc_label}")
-        for key, value in totals.items():
-            if key not in ("CS_TRN_LC", "CS_TRN_GC"):
-                parts.append(f"{key}: {value}")
-
-        return "; ".join(parts) if parts else str(totals)
-
-    async def _auto_execute_tool(
+    def _select_nudge(
         self,
-        tool_name: str,
-        tool_args: dict[str, Any],
+        content: str,
+        response: Any,
         tool_calls_made: list[dict[str, Any]],
-        tool_timings: list[dict[str, Any]],
-    ) -> str:
-        """Execute a tool as part of auto-chaining and track it.
-
-        Adds the synthetic tool call and result to the conversation
-        so the LLM can see it on subsequent turns.
-
-        Returns the tool result as a JSON string.
-        """
-        call_id = f"auto_{tool_name}_{len(tool_calls_made)}"
-
-        self.conversation.add_assistant(
-            content="",
-            tool_calls=[{
-                "name": tool_name,
-                "args": tool_args,
-                "id": call_id,
-            }],
-        )
-
-        tool_start = time.perf_counter()
-        result = await self._execute_tool(tool_name, tool_args)
-        tool_duration = time.perf_counter() - tool_start
-
-        tool_timings.append({
-            "tool": tool_name,
-            "duration_seconds": round(tool_duration, 3),
-        })
-
-        self.conversation.add_tool_result(result, call_id)
-
-        tool_calls_made.append({
-            "tool": tool_name,
-            "args": tool_args,
-            "result": result,
-            "duration_seconds": round(tool_duration, 3),
-        })
-
-        logger.info("Auto-chained %s", tool_name)
-        return result
-
-    async def _try_auto_chain(
-        self,
-        tool_name: str,
-        result: str,
-        tool_calls_made: list[dict[str, Any]],
-        tool_timings: list[dict[str, Any]],
-    ) -> bool:
-        """Run the full investigation playbook deterministically.
-
-        After start_investigation returns a next_step, this method
-        auto-executes the entire playbook (check data, record findings,
-        branch, and summarise) so the LLM only needs to present
-        the final text response.
-
-        Returns True if auto-chaining was executed.
-        """
-        if tool_name != "start_investigation":
-            return False
-
-        try:
-            result_data = json.loads(result)
-        except (json.JSONDecodeError, TypeError):
-            return False
-
-        next_step = result_data.get("next_step")
-        if not next_step or "table" not in next_step:
-            return False
-
-        filters = next_step.get("filters", {})
-        company_code = filters.get("ZCOMPCODE", "")
-        fiscal_period = filters.get("FISCPER", "")
-        table = next_step["table"]
-        version = next_step.get("version", "001")
-        version_name = next_step.get("version_name", f"Version {version}")
-
-        # --- Step 1: check_data_availability on reporting table ---
-        check_args: dict[str, Any] = {"table": table}
-        if filters:
-            check_args["filters"] = filters
-
-        check_result_str = await self._auto_execute_tool(
-            "check_data_availability", check_args,
-            tool_calls_made, tool_timings,
-        )
-
-        try:
-            check_result = json.loads(check_result_str)
-        except (json.JSONDecodeError, TypeError):
-            check_result = {}
-
-        data_found = check_result.get("data_found", False)
-        groups = check_result.get("groups", [])
-        totals = check_result.get("totals", {})
-        scopes = [g.get("ZSCOPE") for g in groups if g.get("ZSCOPE")]
-        has_legal = any(s in self._LEGAL_SCOPES for s in scopes)
-        all_s_none = scopes and all(s == "S_NONE" for s in scopes)
-
-        # --- Branch based on Step 1 result ---
-        formatted_totals = self._format_totals_with_currency(totals, groups)
-
-        if data_found and has_legal:
-            # Data found with expected legal scope — END
-            scope_list = ", ".join(scopes)
-            await self._auto_execute_tool(
-                "record_finding", {
-                    "step_name": "Check reporting table",
-                    "tool_used": "check_data_availability",
-                    "result_summary": (
-                        f"Data found in {table} for CoCd {company_code}, "
-                        f"period {fiscal_period}, version {version} ({version_name}). "
-                        f"{len(groups)} scope groups: {scope_list}. "
-                        f"Totals: {formatted_totals}"
-                    ),
-                    "conclusion": (
-                        "Data exists with expected legal consolidation scope "
-                        f"({', '.join(s for s in scopes if s in self._LEGAL_SCOPES)}). "
-                        "Issue may be in report configuration or user filters."
-                    ),
-                    "status": "normal",
-                },
-                tool_calls_made, tool_timings,
+    ) -> str | None:
+        """Return a nudge message if the LLM needs redirection, else None."""
+        # Invalid (malformed) tool calls
+        if hasattr(response, "invalid_tool_calls") and response.invalid_tool_calls:
+            invalid_names = [tc.get("name", "unknown") for tc in response.invalid_tool_calls]
+            logger.warning("LLM made invalid tool calls: %s. Nudging.", invalid_names)
+            return (
+                "Your tool call(s) were malformed and could not be parsed "
+                f"(tools: {', '.join(invalid_names)}). Please retry the "
+                "tool call(s) with correct JSON arguments."
             )
 
-        elif data_found and all_s_none:
-            # Only S_NONE — consolidation stopped → Step 2A: check ownership
-            await self._auto_execute_tool(
-                "record_finding", {
-                    "step_name": "Check reporting table",
-                    "tool_used": "check_data_availability",
-                    "result_summary": (
-                        f"Data found in {table} but only S_NONE scope. "
-                        f"CoCd {company_code}, period {fiscal_period}, "
-                        f"version {version} ({version_name}). "
-                        f"Totals: {formatted_totals}"
-                    ),
-                    "conclusion": (
-                        "Currency conversion ran but consolidation stopped. "
-                        "Checking ownership next."
-                    ),
-                    "status": "needs_further_check",
-                },
-                tool_calls_made, tool_timings,
-            )
+        # Tool calls written as text
+        if self._looks_like_tool_calls(content):
+            logger.warning("LLM output tool-call-like text. Nudging.")
+            return _TOOL_CALL_NUDGE
 
-            ownership_str = await self._auto_execute_tool(
-                "check_ownership", {
-                    "param_fiscper": fiscal_period,
-                    "param_cocd": company_code,
-                },
-                tool_calls_made, tool_timings,
-            )
+        # Investigation started but not completed
+        if self._investigation_incomplete(tool_calls_made):
+            nudge = self._get_investigation_nudge(tool_calls_made)
+            logger.warning("Investigation incomplete. Nudging: %s", nudge)
+            return nudge
 
-            try:
-                ownership = json.loads(ownership_str)
-            except (json.JSONDecodeError, TypeError):
-                ownership = {}
+        # LLM described a tool call during investigation
+        if (
+            self._investigation_started(tool_calls_made)
+            and self._mentions_tools(content)
+            and not self._investigation_completed(tool_calls_made)
+        ):
+            logger.warning("LLM mentioned tools in text during investigation. Nudging.")
+            return _CONTINUE_NUDGE
 
-            if ownership.get("result"):
-                await self._auto_execute_tool(
-                    "record_finding", {
-                        "step_name": "Check ownership",
-                        "tool_used": "check_ownership",
-                        "result_summary": (
-                            f"Ownership found for CoCd {company_code}, "
-                            f"period {fiscal_period}. "
-                            f"{ownership.get('rows_found', 0)} rows."
-                        ),
-                        "conclusion": (
-                            "Company IS in scope. Consolidation process "
-                            "likely failed or was incomplete. "
-                            "Recommend: Re-run consolidation for this period."
-                        ),
-                        "status": "issue_found",
-                    },
-                    tool_calls_made, tool_timings,
-                )
-            else:
-                await self._auto_execute_tool(
-                    "record_finding", {
-                        "step_name": "Check ownership",
-                        "tool_used": "check_ownership",
-                        "result_summary": (
-                            f"No ownership found for CoCd {company_code}, "
-                            f"period {fiscal_period}."
-                        ),
-                        "conclusion": (
-                            "Company was removed from scope for this period. "
-                            "Check with consolidation team whether this is "
-                            "intentional."
-                        ),
-                        "status": "issue_found",
-                    },
-                    tool_calls_made, tool_timings,
-                )
+        # Empty content after tool calls
+        if not content.strip() and tool_calls_made:
+            return self._build_summarise_nudge(tool_calls_made)
 
-        elif not data_found:
-            # No data at all → Step 2B: check BPC mart
-            await self._auto_execute_tool(
-                "record_finding", {
-                    "step_name": "Check reporting table",
-                    "tool_used": "check_data_availability",
-                    "result_summary": (
-                        f"No data found in {table} for CoCd {company_code}, "
-                        f"period {fiscal_period}, "
-                        f"version {version} ({version_name})."
-                    ),
-                    "conclusion": (
-                        "Data missing from reporting table entirely. "
-                        "Checking BPC mart next."
-                    ),
-                    "status": "needs_further_check",
-                },
-                tool_calls_made, tool_timings,
-            )
-
-            bpc_str = await self._auto_execute_tool(
-                "check_data_availability", {
-                    "table": "CV_ZFI_AA01",
-                    "filters": {
-                        "ZCOMPCODE": company_code,
-                        "FISCPER": fiscal_period,
-                    },
-                    "group_by": ["ZCOMPCODE", "FISCPER"],
-                },
-                tool_calls_made, tool_timings,
-            )
-
-            try:
-                bpc_result = json.loads(bpc_str)
-            except (json.JSONDecodeError, TypeError):
-                bpc_result = {}
-
-            if bpc_result.get("data_found"):
-                await self._auto_execute_tool(
-                    "record_finding", {
-                        "step_name": "Check BPC mart",
-                        "tool_used": "check_data_availability",
-                        "result_summary": (
-                            f"Data found in CV_ZFI_AA01 for "
-                            f"CoCd {company_code}, period {fiscal_period}."
-                        ),
-                        "conclusion": (
-                            "Data exists in BPC mart but not in reporting. "
-                            "Reporting data load likely not triggered. "
-                            "Recommend: Trigger reporting refresh or check "
-                            "data load logs."
-                        ),
-                        "status": "issue_found",
-                    },
-                    tool_calls_made, tool_timings,
-                )
-            else:
-                await self._auto_execute_tool(
-                    "record_finding", {
-                        "step_name": "Check BPC mart",
-                        "tool_used": "check_data_availability",
-                        "result_summary": (
-                            f"No data found in CV_ZFI_AA01 for "
-                            f"CoCd {company_code}, period {fiscal_period}."
-                        ),
-                        "conclusion": (
-                            "Data missing from consolidation entirely. "
-                            "The issue is upstream of the BPC mart. "
-                            "Recommend: Check source data loads into BPC."
-                        ),
-                        "status": "issue_found",
-                    },
-                    tool_calls_made, tool_timings,
-                )
-
-        else:
-            # Data found with mixed/unknown scopes
-            scope_list = ", ".join(scopes) if scopes else "none"
-            await self._auto_execute_tool(
-                "record_finding", {
-                    "step_name": "Check reporting table",
-                    "tool_used": "check_data_availability",
-                    "result_summary": (
-                        f"Data found in {table} with scopes: {scope_list}. "
-                        f"CoCd {company_code}, period {fiscal_period}, "
-                        f"version {version} ({version_name}). "
-                        f"Totals: {formatted_totals}"
-                    ),
-                    "conclusion": (
-                        f"Data exists with non-standard scopes ({scope_list}). "
-                        "Further manual investigation may be needed."
-                    ),
-                    "status": "needs_further_check",
-                },
-                tool_calls_made, tool_timings,
-            )
-
-        # --- Final: get_investigation_summary ---
-        await self._auto_execute_tool(
-            "get_investigation_summary", {},
-            tool_calls_made, tool_timings,
-        )
-
-        return True
+        return None
 
     def _get_investigation_nudge(self, tool_calls_made: list[dict[str, Any]]) -> str:
-        """Build a context-aware nudge based on investigation progress.
-
-        Returns a specific instruction pointing to the next required tool
-        in the investigation workflow sequence.
-        """
+        """Build a context-aware nudge based on investigation progress."""
         tools_called = {tc["tool"] for tc in tool_calls_made}
 
         if "check_data_availability" not in tools_called:
@@ -655,208 +340,62 @@ present the final summary as text.
             + "Call get_investigation_summary NOW to present the final results."
         )
 
-    async def process(self, user_message: str) -> AgentResponse:
-        """Process a user message and return a response.
+    async def _track_tool_call(
+        self,
+        tool_name: str,
+        tool_args: dict[str, Any],
+        tool_calls_made: list[dict[str, Any]],
+        tool_timings: list[dict[str, Any]],
+    ) -> tuple[str, float]:
+        """Execute a tool, record timing and call data. Returns (result, duration)."""
+        tool_start = time.perf_counter()
+        result = await self._execute_tool(tool_name, tool_args)
+        duration = round(time.perf_counter() - tool_start, 3)
 
-        Args:
-            user_message: The user's input message.
+        tool_timings.append({"tool": tool_name, "duration_seconds": duration})
+        tool_calls_made.append(
+            {
+                "tool": tool_name,
+                "args": tool_args,
+                "result": result,
+                "duration_seconds": duration,
+            }
+        )
+        return result, duration
 
-        Returns:
-            AgentResponse with the assistant's response.
-        """
-        request_start = time.perf_counter()
-        self.conversation.add_user(user_message)
+    async def _auto_execute_tool(
+        self,
+        tool_name: str,
+        tool_args: dict[str, Any],
+        tool_calls_made: list[dict[str, Any]],
+        tool_timings: list[dict[str, Any]],
+    ) -> str:
+        """Execute a tool as part of auto-chaining and track it."""
+        call_id = f"auto_{tool_name}_{len(tool_calls_made)}"
 
-        tool_calls_made: list[dict[str, Any]] = []
-        llm_timings: list[dict[str, Any]] = []
-        tool_timings: list[dict[str, Any]] = []
-        iterations = 0
-
-        while iterations < self.max_iterations:
-            iterations += 1
-
-            # Get LLM response
-            lc_messages = self._convert_to_langchain_messages()
-            llm_start = time.perf_counter()
-            response = await self.model.ainvoke(lc_messages)
-            llm_duration = time.perf_counter() - llm_start
-            llm_timings.append(
-                {"iteration": iterations, "duration_seconds": round(llm_duration, 3)}
-            )
-
-            # Debug logging
-            has_tool_calls = hasattr(response, "tool_calls") and response.tool_calls
-            logger.debug(
-                "Iteration %d: content type=%s len=%d, tool_calls=%s",
-                iterations,
-                type(response.content).__name__,
-                len(response.content) if isinstance(response.content, (str, list)) else 0,
-                bool(has_tool_calls),
-            )
-
-            # Check for tool calls
-            if has_tool_calls:
-                # Add assistant message with tool calls
-                self.conversation.add_assistant(
-                    content=response.content or "",
-                    tool_calls=response.tool_calls,
-                )
-
-                # Execute each tool call
-                for tool_call in response.tool_calls:
-                    tool_name = tool_call["name"]
-                    tool_args = tool_call["args"]
-                    tool_id = tool_call["id"]
-
-                    # Execute tool
-                    tool_start = time.perf_counter()
-                    result = await self._execute_tool(tool_name, tool_args)
-                    tool_duration = time.perf_counter() - tool_start
-
-                    tool_timings.append(
-                        {
-                            "tool": tool_name,
-                            "duration_seconds": round(tool_duration, 3),
-                        }
-                    )
-
-                    # Add tool result to conversation
-                    self.conversation.add_tool_result(result, tool_id)
-
-                    # Track tool call
-                    tool_calls_made.append(
-                        {
-                            "tool": tool_name,
-                            "args": tool_args,
-                            "result": result,
-                            "duration_seconds": round(tool_duration, 3),
-                        }
-                    )
-
-                    # Auto-chain: if start_investigation returned next_step,
-                    # call check_data_availability automatically
-                    await self._try_auto_chain(
-                        tool_name, result, tool_calls_made, tool_timings
-                    )
-
-                # Continue loop to get next response
-                continue
-
-            content = self._extract_content(response)
-
-            # Warn when content is empty
-            if not content.strip():
-                logger.warning(
-                    "Iteration %d: empty content. additional_kwargs keys: %s",
-                    iterations,
-                    list(getattr(response, "additional_kwargs", {}).keys()),
-                )
-
-            # Check for invalid (malformed) tool calls that LangChain detected
-            # but couldn't fully parse
-            if hasattr(response, "invalid_tool_calls") and response.invalid_tool_calls:
-                invalid_names = [
-                    tc.get("name", "unknown") for tc in response.invalid_tool_calls
-                ]
-                logger.warning(
-                    "Iteration %d: LLM made invalid tool calls: %s. Nudging to retry.",
-                    iterations,
-                    invalid_names,
-                )
-                self.conversation.add_assistant(content)
-                self.conversation.add_user(
-                    "Your tool call(s) were malformed and could not be parsed "
-                    f"(tools: {', '.join(invalid_names)}). Please retry the "
-                    "tool call(s) with correct JSON arguments."
-                )
-                continue
-
-            # Check if the LLM wrote tool calls as text instead of using
-            # the structured tool calling mechanism
-            if self._looks_like_tool_calls(content):
-                logger.warning(
-                    "Iteration %d: LLM output tool-call-like text instead of "
-                    "structured tool calls. Nudging to retry.",
-                    iterations,
-                )
-                self.conversation.add_assistant(content)
-                self.conversation.add_user(_TOOL_CALL_NUDGE)
-                continue
-
-            # Check if an investigation was started but not completed.
-            # This takes priority over the generic _mentions_tools check
-            # because it provides a context-aware nudge pointing to the
-            # exact next tool in the workflow.
-            if self._investigation_incomplete(tool_calls_made):
-                nudge = self._get_investigation_nudge(tool_calls_made)
-                logger.warning(
-                    "Iteration %d: Investigation incomplete. Nudging: %s",
-                    iterations,
-                    nudge,
-                )
-                self.conversation.add_assistant(content)
-                self.conversation.add_user(nudge)
-                continue
-
-            # Check if the LLM described a tool call instead of making one
-            # (e.g. "Let's call check_data_availability" without actually calling it).
-            # Only triggers during investigation workflows (not simple data checks).
-            # Skip when the investigation is already complete — the final
-            # summary text naturally references tool names.
-            if (
-                self._investigation_started(tool_calls_made)
-                and self._mentions_tools(content)
-                and not self._investigation_completed(tool_calls_made)
-            ):
-                logger.warning(
-                    "Iteration %d: LLM mentioned tools in text after prior tool "
-                    "calls. Nudging to continue.",
-                    iterations,
-                )
-                self.conversation.add_assistant(content)
-                self.conversation.add_user(_CONTINUE_NUDGE)
-                continue
-
-            # Empty content after tool calls — nudge LLM to summarise
-            if not content.strip() and tool_calls_made:
-                nudge = self._build_summarise_nudge(tool_calls_made)
-                self.conversation.add_assistant(content)
-                self.conversation.add_user(nudge)
-                continue
-
-            # No tool calls - we have a final response
-            self.conversation.add_assistant(content)
-
-            total_duration = time.perf_counter() - request_start
-            return AgentResponse(
-                content=content,
-                tool_calls_made=tool_calls_made,
-                finished=True,
-                timing={
-                    "total_seconds": round(total_duration, 3),
-                    "llm_calls": llm_timings,
-                    "tool_calls": tool_timings,
-                },
-            )
-
-        # Max iterations reached
-        total_duration = time.perf_counter() - request_start
-        return AgentResponse(
-            content="I couldn't complete the request within the allowed iterations.",
-            tool_calls_made=tool_calls_made,
-            finished=False,
-            timing={
-                "total_seconds": round(total_duration, 3),
-                "llm_calls": llm_timings,
-                "tool_calls": tool_timings,
-            },
+        self.conversation.add_assistant(
+            content="",
+            tool_calls=[{"name": tool_name, "args": tool_args, "id": call_id}],
         )
 
-    async def process_stream(self, user_message: str) -> AsyncGenerator[dict]:
-        """Process a user message, yielding SSE events as work happens.
+        result, _ = await self._track_tool_call(tool_name, tool_args, tool_calls_made, tool_timings)
+        self.conversation.add_tool_result(result, call_id)
 
-        Yields dicts with keys: event (str), data (dict).
-        The final event is always "done".
+        logger.info("Auto-chained %s", tool_name)
+        return result
+
+    # ------------------------------------------------------------------
+    # Unified event loop
+    # ------------------------------------------------------------------
+
+    async def _run_loop(self, user_message: str) -> AsyncGenerator[dict]:
+        """Core agent loop yielding SSE-style events.
+
+        Both ``process()`` and ``process_stream()`` delegate to this
+        single implementation, eliminating duplication.
+
+        Yields dicts with keys: ``event`` (str), ``data`` (dict).
+        The final event is always ``"done"``.
         """
         request_start = time.perf_counter()
         self.conversation.add_user(user_message)
@@ -865,19 +404,56 @@ present the final summary as text.
         llm_timings: list[dict[str, Any]] = []
         tool_timings: list[dict[str, Any]] = []
         iterations = 0
+
+        def _build_timing() -> dict[str, Any]:
+            return {
+                "total_seconds": round(time.perf_counter() - request_start, 3),
+                "llm_calls": llm_timings,
+                "tool_calls": tool_timings,
+            }
+
+        # Callback for the playbook to execute tracked tools
+        async def _tracked_execute(name: str, args: dict[str, Any]) -> str:
+            return await self._auto_execute_tool(
+                name,
+                args,
+                tool_calls_made,
+                tool_timings,
+            )
 
         while iterations < self.max_iterations:
             iterations += 1
 
             yield {"event": "thinking", "data": {"iteration": iterations}}
 
+            # --- LLM call with timeout ---
             lc_messages = self._convert_to_langchain_messages()
             llm_start = time.perf_counter()
-            response = await self.model.ainvoke(lc_messages)
+
+            try:
+                response = await asyncio.wait_for(
+                    self.model.ainvoke(lc_messages),
+                    timeout=self.llm_timeout,
+                )
+            except TimeoutError:
+                logger.error(
+                    "LLM call timed out after %.1fs on iteration %d",
+                    self.llm_timeout,
+                    iterations,
+                )
+                yield {
+                    "event": "done",
+                    "data": {
+                        "response": "The AI model took too long to respond. Please try again.",
+                        "tool_calls": tool_calls_made,
+                        "finished": False,
+                        "timing": _build_timing(),
+                    },
+                }
+                return
+
             llm_duration = round(time.perf_counter() - llm_start, 3)
-            llm_timings.append(
-                {"iteration": iterations, "duration_seconds": llm_duration}
-            )
+            llm_timings.append({"iteration": iterations, "duration_seconds": llm_duration})
 
             yield {
                 "event": "llm_response",
@@ -897,6 +473,7 @@ present the final summary as text.
                 bool(has_tool_calls),
             )
 
+            # --- Handle tool calls ---
             if has_tool_calls:
                 self.conversation.add_assistant(
                     content=response.content or "",
@@ -913,38 +490,26 @@ present the final summary as text.
                         "data": {"tool": tool_name, "args": tool_args},
                     }
 
-                    tool_start = time.perf_counter()
-                    result = await self._execute_tool(tool_name, tool_args)
-                    tool_duration = round(time.perf_counter() - tool_start, 3)
-
-                    tool_timings.append(
-                        {"tool": tool_name, "duration_seconds": tool_duration}
+                    result, duration = await self._track_tool_call(
+                        tool_name, tool_args, tool_calls_made, tool_timings
                     )
-
                     self.conversation.add_tool_result(result, tool_id)
-
-                    tool_calls_made.append(
-                        {
-                            "tool": tool_name,
-                            "args": tool_args,
-                            "result": result,
-                            "duration_seconds": tool_duration,
-                        }
-                    )
 
                     yield {
                         "event": "tool_result",
                         "data": {
                             "tool": tool_name,
                             "result": result,
-                            "duration_seconds": tool_duration,
+                            "duration_seconds": duration,
                         },
                     }
 
                     # Auto-chain: run full playbook if start_investigation
                     pre_chain_count = len(tool_calls_made)
-                    chained = await self._try_auto_chain(
-                        tool_name, result, tool_calls_made, tool_timings
+                    chained = await self._playbook.try_auto_chain(
+                        tool_name,
+                        result,
+                        _tracked_execute,
                     )
                     if chained:
                         for rec in tool_calls_made[pre_chain_count:]:
@@ -960,17 +525,15 @@ present the final summary as text.
                                 "data": {
                                     "tool": rec["tool"],
                                     "result": rec["result"],
-                                    "duration_seconds": rec[
-                                        "duration_seconds"
-                                    ],
+                                    "duration_seconds": rec["duration_seconds"],
                                 },
                             }
 
                 continue
 
+            # --- No tool calls — check nudges ---
             content = self._extract_content(response)
 
-            # Warn when content is empty
             if not content.strip():
                 logger.warning(
                     "Iteration %d: empty content. additional_kwargs keys: %s",
@@ -978,82 +541,14 @@ present the final summary as text.
                     list(getattr(response, "additional_kwargs", {}).keys()),
                 )
 
-            # Check for invalid (malformed) tool calls
-            if hasattr(response, "invalid_tool_calls") and response.invalid_tool_calls:
-                invalid_names = [
-                    tc.get("name", "unknown") for tc in response.invalid_tool_calls
-                ]
-                logger.warning(
-                    "Iteration %d: LLM made invalid tool calls: %s. Nudging to retry.",
-                    iterations,
-                    invalid_names,
-                )
-                self.conversation.add_assistant(content)
-                self.conversation.add_user(
-                    "Your tool call(s) were malformed and could not be parsed "
-                    f"(tools: {', '.join(invalid_names)}). Please retry the "
-                    "tool call(s) with correct JSON arguments."
-                )
-                continue
-
-            # Check if the LLM wrote tool calls as text
-            if self._looks_like_tool_calls(content):
-                logger.warning(
-                    "Iteration %d: LLM output tool-call-like text instead of "
-                    "structured tool calls. Nudging to retry.",
-                    iterations,
-                )
-                self.conversation.add_assistant(content)
-                self.conversation.add_user(_TOOL_CALL_NUDGE)
-                continue
-
-            # Check if an investigation was started but not completed.
-            # Priority over generic _mentions_tools — provides workflow-
-            # specific nudge pointing to the exact next tool.
-            if self._investigation_incomplete(tool_calls_made):
-                nudge = self._get_investigation_nudge(tool_calls_made)
-                logger.warning(
-                    "Iteration %d: Investigation incomplete. Nudging: %s",
-                    iterations,
-                    nudge,
-                )
+            nudge = self._select_nudge(content, response, tool_calls_made)
+            if nudge is not None:
                 self.conversation.add_assistant(content)
                 self.conversation.add_user(nudge)
                 continue
 
-            # Check if the LLM described a tool call instead of making one.
-            # Only triggers during investigation workflows (not simple data checks).
-            # Skip when the investigation is already complete — the final
-            # summary text naturally references tool names.
-            if (
-                self._investigation_started(tool_calls_made)
-                and self._mentions_tools(content)
-                and not self._investigation_completed(tool_calls_made)
-            ):
-                logger.warning(
-                    "Iteration %d: LLM mentioned tools in text after prior tool "
-                    "calls. Nudging to continue.",
-                    iterations,
-                )
-                self.conversation.add_assistant(content)
-                self.conversation.add_user(_CONTINUE_NUDGE)
-                continue
-
-            # Empty content after tool calls — nudge LLM to summarise
-            if not content.strip() and tool_calls_made:
-                nudge = self._build_summarise_nudge(tool_calls_made)
-                self.conversation.add_assistant(content)
-                self.conversation.add_user(nudge)
-                continue
-
+            # --- Final response ---
             self.conversation.add_assistant(content)
-
-            total_duration = round(time.perf_counter() - request_start, 3)
-            timing = {
-                "total_seconds": total_duration,
-                "llm_calls": llm_timings,
-                "tool_calls": tool_timings,
-            }
 
             yield {"event": "text_delta", "data": {"content": content}}
             yield {
@@ -1062,26 +557,61 @@ present the final summary as text.
                     "response": content,
                     "tool_calls": tool_calls_made,
                     "finished": True,
-                    "timing": timing,
+                    "timing": _build_timing(),
                 },
             }
             return
 
-        total_duration = round(time.perf_counter() - request_start, 3)
-        timing = {
-            "total_seconds": total_duration,
-            "llm_calls": llm_timings,
-            "tool_calls": tool_timings,
-        }
+        # Max iterations reached
         yield {
             "event": "done",
             "data": {
                 "response": "I couldn't complete the request within the allowed iterations.",
                 "tool_calls": tool_calls_made,
                 "finished": False,
-                "timing": timing,
+                "timing": _build_timing(),
             },
         }
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    async def process(self, user_message: str) -> AgentResponse:
+        """Process a user message and return a response.
+
+        Args:
+            user_message: The user's input message.
+
+        Returns:
+            AgentResponse with the assistant's response.
+        """
+        last_event: dict | None = None
+        async for event in self._run_loop(user_message):
+            last_event = event
+
+        if last_event is None or last_event.get("event") != "done":
+            return AgentResponse(
+                content="No response generated.",
+                finished=False,
+            )
+
+        data = last_event["data"]
+        return AgentResponse(
+            content=data["response"],
+            tool_calls_made=data["tool_calls"],
+            finished=data["finished"],
+            timing=data["timing"],
+        )
+
+    async def process_stream(self, user_message: str) -> AsyncGenerator[dict]:
+        """Process a user message, yielding SSE events as work happens.
+
+        Yields dicts with keys: event (str), data (dict).
+        The final event is always "done".
+        """
+        async for event in self._run_loop(user_message):
+            yield event
 
     def reset(self) -> None:
         """Reset the conversation, keeping only the system prompt."""

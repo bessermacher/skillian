@@ -3,7 +3,6 @@
 import json
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import typer
@@ -129,9 +128,7 @@ def skill_info(
     # Show tool error if any
     tool_error = skill.metadata.get("tool_error")
     if tool_error:
-        console.print(
-            f"\n[yellow]Note: Tools cannot be loaded without connector.[/yellow]"
-        )
+        console.print("\n[yellow]Note: Tools cannot be loaded without connector.[/yellow]")
         console.print(f"[dim]Requires '{skill.connector_type}' connector to be configured.[/dim]")
 
     # Tools table (from YAML if we can't load them)
@@ -239,7 +236,7 @@ def create_skill(
 def _create_basic_skill(skill_dir: Path, skill_name: str, domain: str):
     """Create a basic skill from scratch."""
     # SKILL.md
-    skill_md_content = f'''---
+    skill_md_content = f"""---
 name: {skill_name}
 description: |
   Description of {skill_name} skill.
@@ -280,11 +277,11 @@ Activate this skill when the user asks about:
 
 User: "Sample user query"
 Assistant: Describes what tools to use
-'''
+"""
     (skill_dir / "SKILL.md").write_text(skill_md_content)
 
     # tools.yaml
-    tools_yaml_content = f'''tools:
+    tools_yaml_content = f"""tools:
   - name: example_tool
     description: |
       Example tool description.
@@ -299,7 +296,7 @@ Assistant: Describes what tools to use
         required: false
         description: Optional second parameter
     implementation: app.skills.{skill_name}.tools:example_tool
-'''
+"""
     (skill_dir / "tools.yaml").write_text(tools_yaml_content)
 
     # tools.py

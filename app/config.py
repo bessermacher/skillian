@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     # LLM Provider
     llm_provider: Literal["ollama", "anthropic", "openai", "custom_openai"] = "ollama"
     llm_temperature: float = 0.1
+    llm_timeout: float = 120.0  # seconds for LLM call timeout
+    tool_timeout: float = 60.0  # seconds for individual tool execution timeout
+    max_iterations: int = 15  # max agent loop iterations
+
+    # Embedding model override (None = provider default)
+    embedding_model: str | None = None
 
     # Ollama
     ollama_base_url: str = "http://localhost:11434"
@@ -77,33 +83,33 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         return self.env == "production"
 
+    _PROVIDER_API_KEYS: dict[str, str] = {
+        "anthropic": "anthropic_api_key",
+        "openai": "openai_api_key",
+        "custom_openai": "custom_openai_api_key",
+    }
+
     @model_validator(mode="after")
     def validate_provider_config(self) -> Self:
         """Validate that required API keys are present for the selected provider."""
-        if self.llm_provider == "anthropic" and not self.anthropic_api_key:
+        key_field = self._PROVIDER_API_KEYS.get(self.llm_provider)
+        if key_field and not getattr(self, key_field):
             raise ValueError(
-                "ANTHROPIC_API_KEY is required when LLM_PROVIDER=anthropic"
-            )
-        if self.llm_provider == "openai" and not self.openai_api_key:
-            raise ValueError(
-                "OPENAI_API_KEY is required when LLM_PROVIDER=openai"
-            )
-        if self.llm_provider == "custom_openai" and not self.custom_openai_api_key:
-            raise ValueError(
-                "CUSTOM_OPENAI_API_KEY is required when LLM_PROVIDER=custom_openai"
+                f"{key_field.upper()} is required when LLM_PROVIDER={self.llm_provider}"
             )
         return self
 
     @model_validator(mode="after")
     def validate_datasphere_config(self) -> Self:
         """Validate Datasphere config when connector is needed."""
-        if self.datasphere_host and not all([
-            self.datasphere_user,
-            self.datasphere_password,
-        ]):
+        if self.datasphere_host and not all(
+            [
+                self.datasphere_user,
+                self.datasphere_password,
+            ]
+        ):
             raise ValueError(
-                "DATASPHERE_USER and DATASPHERE_PASSWORD are required "
-                "when DATASPHERE_HOST is set"
+                "DATASPHERE_USER and DATASPHERE_PASSWORD are required when DATASPHERE_HOST is set"
             )
         return self
 

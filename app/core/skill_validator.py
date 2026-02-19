@@ -67,10 +67,9 @@ def validate_skill_directory(skill_path: Path) -> dict[str, Any]:
 
     # Check for skill definition file
     skill_md = skill_path / "SKILL.md"
-    skill_py = skill_path / "skill.py"
 
-    if not skill_md.exists() and not skill_py.exists():
-        errors.append("No skill definition found (SKILL.md or skill.py)")
+    if not skill_md.exists():
+        errors.append("No skill definition found (SKILL.md)")
 
     # Validate SKILL.md if present
     if skill_md.exists():
@@ -168,15 +167,13 @@ def _validate_tools_yaml(path: Path) -> tuple[list[str], list[str]]:
             if "description" not in tool:
                 warnings.append(f"Tool '{tool.get('name', i)}' missing description")
 
-            # Check implementation or query_template or legacy format
+            # Check implementation or query_template
             has_impl = "implementation" in tool
             has_query = "query_template" in tool
-            has_legacy = "function" in tool and "input_schema" in tool
 
-            if not has_impl and not has_query and not has_legacy:
+            if not has_impl and not has_query:
                 errors.append(
-                    f"Tool '{tool.get('name', i)}' needs 'implementation', 'query_template', "
-                    "or 'function' + 'input_schema'"
+                    f"Tool '{tool.get('name', i)}' needs 'implementation' or 'query_template'"
                 )
 
     except yaml.YAMLError as e:

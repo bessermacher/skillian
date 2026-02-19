@@ -113,9 +113,16 @@ def get_rag_manager() -> RAGManager:
 
 def get_agent() -> Agent:
     """Get a configured agent instance."""
+    settings = get_settings()
     chat_model = get_chat_model()
     registry = get_skill_registry()
-    return Agent(chat_model, registry)
+    return Agent(
+        chat_model,
+        registry,
+        max_iterations=settings.max_iterations,
+        llm_timeout=settings.llm_timeout,
+        tool_timeout=settings.tool_timeout,
+    )
 
 
 async def get_session_store() -> AsyncGenerator[SessionStore]:

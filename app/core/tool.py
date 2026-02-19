@@ -60,22 +60,16 @@ class Tool:
                         coerced[field_name] = []
                     else:
                         coerced[field_name] = list(value.keys())
-                    logger.debug(
-                        "Tool %s: coerced %s from dict to list", self.name, field_name
-                    )
+                    logger.debug("Tool %s: coerced %s from dict to list", self.name, field_name)
                 elif isinstance(value, str):
                     coerced[field_name] = [value]
-                    logger.debug(
-                        "Tool %s: coerced %s from str to list", self.name, field_name
-                    )
+                    logger.debug("Tool %s: coerced %s from str to list", self.name, field_name)
 
             # Coerce list/other → dict when a dict is expected
             elif expected is dict or origin is dict:
                 if isinstance(value, list):
                     coerced[field_name] = {}
-                    logger.debug(
-                        "Tool %s: coerced %s from list to dict", self.name, field_name
-                    )
+                    logger.debug("Tool %s: coerced %s from list to dict", self.name, field_name)
 
             # Coerce str → int/float when a number is expected
             elif expected in (int, float) and isinstance(value, str):
@@ -83,7 +77,9 @@ class Tool:
                     coerced[field_name] = expected(value)
                     logger.debug(
                         "Tool %s: coerced %s from str to %s",
-                        self.name, field_name, expected.__name__,
+                        self.name,
+                        field_name,
+                        expected.__name__,
                     )
                 except (ValueError, TypeError):
                     pass  # let Pydantic report the error

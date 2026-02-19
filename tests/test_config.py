@@ -1,7 +1,5 @@
 """Tests for configuration module."""
 
-
-
 from app.config import Settings, get_settings
 
 

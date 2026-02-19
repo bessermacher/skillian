@@ -61,7 +61,7 @@ WHERE "FISCPER" = '{param_fiscper}'
             "rows_found": len(results),
             "param_fiscper": param_fiscper,
             "param_cocd": param_cocd,
-            "columns": list(results[0].keys()) if results else []
+            "columns": list(results[0].keys()) if results else [],
         }
     except DatasphereQueryError as e:
         logger.error("check_ownership: query failed — %s", e)

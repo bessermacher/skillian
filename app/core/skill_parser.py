@@ -3,57 +3,12 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import frontmatter
 
 from app.core.exception import SkillValidationError
-
-
-@dataclass
-class SkillDefinition:
-    """Parsed SKILL.md content."""
-
-    # Required fields
-    name: str
-    description: str
-
-    # Optional metadata
-    version: str = "1.0.0"
-    author: str = ""
-    domain: str = ""
-    tags: list[str] = field(default_factory=list)
-    connector: str | None = None
-    license: str = ""
-
-    # Parsed markdown sections
-    instructions: str = ""
-    capabilities: list[str] = field(default_factory=list)
-    examples: list[dict[str, str]] = field(default_factory=list)
-    when_to_use: list[str] = field(default_factory=list)
-
-    # Raw content
-    raw_content: str = ""
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary for skill loader."""
-        return {
-            "name": self.name,
-            "description": self.description,
-            "version": self.version,
-            "author": self.author,
-            "domain": self.domain,
-            "tags": self.tags,
-            "connector": self.connector,
-            "instructions": self.instructions,
-            "capabilities": self.capabilities,
-            "examples": self.examples,
-            "when_to_use": self.when_to_use,
-            "metadata": self.metadata,
-        }
 
 
 def parse_skill_md(path: Path | str) -> dict[str, Any]:
@@ -221,12 +176,8 @@ def _parse_examples(content: str) -> list[dict[str, str]]:
         example_content = parts[i + 1].strip()
 
         # Parse user/assistant from content
-        user_match = re.search(
-            r"User:\s*[\"']?(.+?)[\"']?\s*$", example_content, re.MULTILINE
-        )
-        assistant_match = re.search(
-            r"Assistant:\s*(.+?)(?:\n\n|\Z)", example_content, re.DOTALL
-        )
+        user_match = re.search(r"User:\s*[\"']?(.+?)[\"']?\s*$", example_content, re.MULTILINE)
+        assistant_match = re.search(r"Assistant:\s*(.+?)(?:\n\n|\Z)", example_content, re.DOTALL)
 
         example = {
             "title": title,
@@ -304,19 +255,3 @@ def validate_skill_md(path: Path | str) -> list[str]:
         warnings.append(f"Version '{version}' doesn't follow semver (x.y.z)")
 
     return warnings
-
-
-# Convenience function for use in skill_loader
-def parse_skill_config(skill_path: Path) -> dict[str, Any]:
-    """Parse skill configuration from a skill directory.
-
-    Looks for SKILL.md in the directory and parses it.
-
-    Args:
-        skill_path: Path to skill directory
-
-    Returns:
-        Skill configuration dictionary
-    """
-    skill_md = skill_path / "SKILL.md"
-    return parse_skill_md(skill_md)

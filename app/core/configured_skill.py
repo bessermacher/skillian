@@ -39,11 +39,6 @@ class ConfiguredSkill:
         """Get list of all tool names."""
         return [tool.name for tool in self.tools]
 
-    @property
-    def is_enabled(self) -> bool:
-        """Check if skill is enabled."""
-        return self.metadata.get("enabled", True)
-
     def __repr__(self) -> str:
         return (
             f"ConfiguredSkill(name={self.name!r}, "

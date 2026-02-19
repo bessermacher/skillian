@@ -117,8 +117,7 @@ class TestAgent:
         # First response: tool call as text (no actual tool_calls)
         text_response = MagicMock()
         text_response.content = (
-            'I will call the tool now:\n'
-            '{"name": "dummy_query", "arguments": {"query": "test"}}'
+            'I will call the tool now:\n{"name": "dummy_query", "arguments": {"query": "test"}}'
         )
         text_response.tool_calls = []
         text_response.invalid_tool_calls = []
@@ -401,8 +400,7 @@ class TestAgent:
         nudge_messages = [
             m
             for m in agent.conversation.messages
-            if m.role.value == "user"
-            and "continue the current one" in m.content
+            if m.role.value == "user" and "continue the current one" in m.content
         ]
         assert len(nudge_messages) == 0
 
@@ -417,9 +415,7 @@ class TestAgent:
         assert agent._investigation_incomplete([{"tool": "dummy_query"}]) is False
 
         # start_investigation called, no summary → incomplete
-        assert (
-            agent._investigation_incomplete([{"tool": "start_investigation"}]) is True
-        )
+        assert agent._investigation_incomplete([{"tool": "start_investigation"}]) is True
 
         # Both called → complete
         assert (
@@ -437,9 +433,7 @@ class TestAgent:
         agent = Agent(mock_model, registry)
 
         # After start_investigation only → nudge to check_data_availability
-        nudge = agent._get_investigation_nudge(
-            [{"tool": "start_investigation"}]
-        )
+        nudge = agent._get_investigation_nudge([{"tool": "start_investigation"}])
         assert "check_data_availability" in nudge
         assert "Do NOT start a new investigation" in nudge
 
@@ -468,9 +462,7 @@ class TestAgent:
 
         assert agent._investigation_completed([]) is False
         assert agent._investigation_completed([{"tool": "dummy_query"}]) is False
-        assert (
-            agent._investigation_completed([{"tool": "start_investigation"}]) is False
-        )
+        assert agent._investigation_completed([{"tool": "start_investigation"}]) is False
         assert (
             agent._investigation_completed(
                 [
@@ -527,30 +519,22 @@ class TestAgent:
         # 1. start_investigation
         r1 = MagicMock()
         r1.content = ""
-        r1.tool_calls = [
-            {"id": "c1", "name": "start_investigation", "args": {"query": "t"}}
-        ]
+        r1.tool_calls = [{"id": "c1", "name": "start_investigation", "args": {"query": "t"}}]
 
         # 2. check_data_availability
         r2 = MagicMock()
         r2.content = ""
-        r2.tool_calls = [
-            {"id": "c2", "name": "check_data_availability", "args": {"query": "t"}}
-        ]
+        r2.tool_calls = [{"id": "c2", "name": "check_data_availability", "args": {"query": "t"}}]
 
         # 3. record_finding
         r3 = MagicMock()
         r3.content = ""
-        r3.tool_calls = [
-            {"id": "c3", "name": "record_finding", "args": {"query": "t"}}
-        ]
+        r3.tool_calls = [{"id": "c3", "name": "record_finding", "args": {"query": "t"}}]
 
         # 4. get_investigation_summary
         r4 = MagicMock()
         r4.content = ""
-        r4.tool_calls = [
-            {"id": "c4", "name": "get_investigation_summary", "args": {"query": "t"}}
-        ]
+        r4.tool_calls = [{"id": "c4", "name": "get_investigation_summary", "args": {"query": "t"}}]
 
         # 5. Final text that mentions tool names — should NOT be nudged
         r5 = MagicMock()
@@ -578,9 +562,7 @@ class TestAgent:
         assert len(continue_nudges) == 0
 
     @pytest.mark.asyncio
-    async def test_auto_chain_runs_full_playbook(
-        self, mock_model, registry
-    ):
+    async def test_auto_chain_runs_full_playbook(self, mock_model, registry):
         """When start_investigation returns next_step, the entire playbook
         should be auto-chained: check_data → record_finding → summary."""
         inv_registry = SkillRegistry()
@@ -657,9 +639,7 @@ class TestAgent:
         final_response.tool_calls = []
         final_response.invalid_tool_calls = []
 
-        mock_model.ainvoke = AsyncMock(
-            side_effect=[start_response, final_response]
-        )
+        mock_model.ainvoke = AsyncMock(side_effect=[start_response, final_response])
 
         agent = Agent(mock_model, inv_registry)
         response = await agent.process("Check data for CoCd 1110")
@@ -685,9 +665,7 @@ class TestAgent:
         assert mock_model.ainvoke.call_count == 2
 
     @pytest.mark.asyncio
-    async def test_auto_chain_s_none_branch_checks_ownership(
-        self, mock_model, registry
-    ):
+    async def test_auto_chain_s_none_branch_checks_ownership(self, mock_model, registry):
         """When check_data returns only S_NONE scopes, playbook should
         branch to check_ownership."""
         inv_registry = SkillRegistry()
@@ -761,9 +739,7 @@ class TestAgent:
         final_response.tool_calls = []
         final_response.invalid_tool_calls = []
 
-        mock_model.ainvoke = AsyncMock(
-            side_effect=[start_response, final_response]
-        )
+        mock_model.ainvoke = AsyncMock(side_effect=[start_response, final_response])
 
         agent = Agent(mock_model, inv_registry)
         response = await agent.process("Check data")
@@ -772,23 +748,20 @@ class TestAgent:
         assert tools_called == [
             "start_investigation",
             "check_data_availability",
-            "record_finding",        # Step 1 finding
-            "check_ownership",        # Step 2A
-            "record_finding",         # Step 2A finding
+            "record_finding",  # Step 1 finding
+            "check_ownership",  # Step 2A
+            "record_finding",  # Step 2A finding
             "get_investigation_summary",
         ]
         # check_ownership used correct params from investigation context
         ownership_call = next(
-            tc for tc in response.tool_calls_made
-            if tc["tool"] == "check_ownership"
+            tc for tc in response.tool_calls_made if tc["tool"] == "check_ownership"
         )
         assert ownership_call["args"]["param_cocd"] == "1110"
         assert ownership_call["args"]["param_fiscper"] == "2026001"
 
     @pytest.mark.asyncio
-    async def test_auto_chain_no_data_branch_checks_bpc_mart(
-        self, mock_model, registry
-    ):
+    async def test_auto_chain_no_data_branch_checks_bpc_mart(self, mock_model, registry):
         """When check_data returns no data, playbook should check BPC mart."""
         inv_registry = SkillRegistry()
         inv_registry.register(
@@ -852,9 +825,7 @@ class TestAgent:
         final_response.tool_calls = []
         final_response.invalid_tool_calls = []
 
-        mock_model.ainvoke = AsyncMock(
-            side_effect=[start_response, final_response]
-        )
+        mock_model.ainvoke = AsyncMock(side_effect=[start_response, final_response])
 
         agent = Agent(mock_model, inv_registry)
         response = await agent.process("Check data")
@@ -862,10 +833,10 @@ class TestAgent:
         tools_called = [tc["tool"] for tc in response.tool_calls_made]
         assert tools_called == [
             "start_investigation",
-            "check_data_availability",   # Step 1: reporting table
-            "record_finding",             # Step 1 finding
-            "check_data_availability",    # Step 2B: BPC mart
-            "record_finding",             # Step 2B finding
+            "check_data_availability",  # Step 1: reporting table
+            "record_finding",  # Step 1 finding
+            "check_data_availability",  # Step 2B: BPC mart
+            "record_finding",  # Step 2B finding
             "get_investigation_summary",
         ]
         # Second check_data should target CV_ZFI_AA01
@@ -874,9 +845,7 @@ class TestAgent:
         assert bpc_call["args"]["filters"]["ZCOMPCODE"] == "2200"
 
     @pytest.mark.asyncio
-    async def test_auto_chain_skipped_without_next_step(
-        self, mock_model, registry
-    ):
+    async def test_auto_chain_skipped_without_next_step(self, mock_model, registry):
         """Auto-chain should not fire when start_investigation has no next_step."""
         inv_registry = SkillRegistry()
         inv_registry.register(
