@@ -228,6 +228,78 @@ present the final summary as text.
             and "get_investigation_summary" in tools_called
         )
 
+    @staticmethod
+    def _extract_content(response: AIMessage) -> str:
+        """Extract text content from an LLM response with provider fallbacks.
+
+        Handles quirks across providers:
+        - Primary: response.content (string)
+        - Fallback: list-type content blocks (Anthropic format)
+        - Fallback: response.additional_kwargs.message.content (Ollama)
+        - Fallback: response.additional_kwargs.content (generic)
+        """
+        # Primary: string content
+        if isinstance(response.content, str) and response.content.strip():
+            return response.content
+
+        # Fallback: list-type content blocks (Anthropic format)
+        if isinstance(response.content, list):
+            text_parts = []
+            for block in response.content:
+                if isinstance(block, str):
+                    text_parts.append(block)
+                elif isinstance(block, dict) and block.get("type") == "text":
+                    text_parts.append(block.get("text", ""))
+            combined = "".join(text_parts)
+            if combined.strip():
+                return combined
+
+        # Fallback: Ollama additional_kwargs
+        kwargs = getattr(response, "additional_kwargs", {})
+        if isinstance(kwargs.get("message"), dict):
+            ollama_content = kwargs["message"].get("content", "")
+            if ollama_content and ollama_content.strip():
+                return ollama_content
+
+        # Fallback: generic additional_kwargs.content
+        if kwargs.get("content") and isinstance(kwargs["content"], str):
+            if kwargs["content"].strip():
+                return kwargs["content"]
+
+        return response.content if isinstance(response.content, str) else ""
+
+    @staticmethod
+    def _build_summarise_nudge(tool_calls_made: list[dict[str, Any]]) -> str:
+        """Build a nudge that includes actual tool results for the LLM to summarise.
+
+        Used when the LLM returns empty content after tool calls.
+        Including the tool results inline prevents the model from
+        hallucinating on retry.
+        """
+        parts = [
+            "Your previous response was empty. Here are the tool results you "
+            "need to summarise for the user:\n"
+        ]
+        for tc in tool_calls_made:
+            parts.append(f"Tool: {tc['tool']}")
+            parts.append(f"Args: {json.dumps(tc['args'], default=str)}")
+            parts.append(f"Result: {tc['result']}\n")
+
+        parts.append(
+            "Provide a clear, concise text summary of these findings.\n"
+            "Do NOT call any tools — just answer the user's question based on "
+            "the results above."
+        )
+        return "\n".join(parts)
+
+    def _investigation_started(self, tool_calls_made: list[dict[str, Any]]) -> bool:
+        """Check if start_investigation was called.
+
+        Used to scope the _mentions_tools nudge so it only triggers
+        during investigation workflows, not simple data checks.
+        """
+        return any(tc["tool"] == "start_investigation" for tc in tool_calls_made)
+
     _LEGAL_SCOPES = {"S_LEGAL", "S_LEGAL_DKK", "S_LEGAL_SPECIAL"}
 
     @staticmethod
@@ -612,8 +684,18 @@ present the final summary as text.
                 {"iteration": iterations, "duration_seconds": round(llm_duration, 3)}
             )
 
+            # Debug logging
+            has_tool_calls = hasattr(response, "tool_calls") and response.tool_calls
+            logger.debug(
+                "Iteration %d: content type=%s len=%d, tool_calls=%s",
+                iterations,
+                type(response.content).__name__,
+                len(response.content) if isinstance(response.content, (str, list)) else 0,
+                bool(has_tool_calls),
+            )
+
             # Check for tool calls
-            if hasattr(response, "tool_calls") and response.tool_calls:
+            if has_tool_calls:
                 # Add assistant message with tool calls
                 self.conversation.add_assistant(
                     content=response.content or "",
@@ -660,7 +742,15 @@ present the final summary as text.
                 # Continue loop to get next response
                 continue
 
-            content = response.content or ""
+            content = self._extract_content(response)
+
+            # Warn when content is empty
+            if not content.strip():
+                logger.warning(
+                    "Iteration %d: empty content. additional_kwargs keys: %s",
+                    iterations,
+                    list(getattr(response, "additional_kwargs", {}).keys()),
+                )
 
             # Check for invalid (malformed) tool calls that LangChain detected
             # but couldn't fully parse
@@ -710,10 +800,11 @@ present the final summary as text.
 
             # Check if the LLM described a tool call instead of making one
             # (e.g. "Let's call check_data_availability" without actually calling it).
+            # Only triggers during investigation workflows (not simple data checks).
             # Skip when the investigation is already complete — the final
             # summary text naturally references tool names.
             if (
-                tool_calls_made
+                self._investigation_started(tool_calls_made)
                 and self._mentions_tools(content)
                 and not self._investigation_completed(tool_calls_made)
             ):
@@ -724,6 +815,13 @@ present the final summary as text.
                 )
                 self.conversation.add_assistant(content)
                 self.conversation.add_user(_CONTINUE_NUDGE)
+                continue
+
+            # Empty content after tool calls — nudge LLM to summarise
+            if not content.strip() and tool_calls_made:
+                nudge = self._build_summarise_nudge(tool_calls_made)
+                self.conversation.add_assistant(content)
+                self.conversation.add_user(nudge)
                 continue
 
             # No tool calls - we have a final response
@@ -789,7 +887,17 @@ present the final summary as text.
                 },
             }
 
-            if hasattr(response, "tool_calls") and response.tool_calls:
+            # Debug logging
+            has_tool_calls = hasattr(response, "tool_calls") and response.tool_calls
+            logger.debug(
+                "Iteration %d: content type=%s len=%d, tool_calls=%s",
+                iterations,
+                type(response.content).__name__,
+                len(response.content) if isinstance(response.content, (str, list)) else 0,
+                bool(has_tool_calls),
+            )
+
+            if has_tool_calls:
                 self.conversation.add_assistant(
                     content=response.content or "",
                     tool_calls=response.tool_calls,
@@ -860,7 +968,15 @@ present the final summary as text.
 
                 continue
 
-            content = response.content or ""
+            content = self._extract_content(response)
+
+            # Warn when content is empty
+            if not content.strip():
+                logger.warning(
+                    "Iteration %d: empty content. additional_kwargs keys: %s",
+                    iterations,
+                    list(getattr(response, "additional_kwargs", {}).keys()),
+                )
 
             # Check for invalid (malformed) tool calls
             if hasattr(response, "invalid_tool_calls") and response.invalid_tool_calls:
@@ -906,10 +1022,11 @@ present the final summary as text.
                 continue
 
             # Check if the LLM described a tool call instead of making one.
+            # Only triggers during investigation workflows (not simple data checks).
             # Skip when the investigation is already complete — the final
             # summary text naturally references tool names.
             if (
-                tool_calls_made
+                self._investigation_started(tool_calls_made)
                 and self._mentions_tools(content)
                 and not self._investigation_completed(tool_calls_made)
             ):
@@ -920,6 +1037,13 @@ present the final summary as text.
                 )
                 self.conversation.add_assistant(content)
                 self.conversation.add_user(_CONTINUE_NUDGE)
+                continue
+
+            # Empty content after tool calls — nudge LLM to summarise
+            if not content.strip() and tool_calls_made:
+                nudge = self._build_summarise_nudge(tool_calls_made)
+                self.conversation.add_assistant(content)
+                self.conversation.add_user(nudge)
                 continue
 
             self.conversation.add_assistant(content)
