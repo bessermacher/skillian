@@ -189,7 +189,13 @@ if prompt := st.chat_input("Ask about SAP BW data issues..."):
                             status.update(label="Error", state="error")
 
                 # Show the final response
-                st.markdown(assistant_message)
+                if assistant_message and assistant_message.strip():
+                    st.markdown(assistant_message)
+                elif tool_calls:
+                    st.warning(
+                        "The LLM did not produce a text conclusion. "
+                        "Check the tool call results above for details."
+                    )
 
                 # Show timing summary
                 if timing_info:
