@@ -149,9 +149,68 @@ Activate this skill when the user:
 
 ## Examples
 
-### Example 1: Missing Actual Data
+<examples>
 
+<example>
 User: "Consolidated Management PnL report has no actual data for CoCd 1110 in December 2024"
-Assistant: Starts investigation, follows the "Missing Data in Consolidated Management PnL Report"
-playbook step by step, checks CV_ZBC_AA61, branches based on findings, checks CV_ZFI_AA01
-or ownership table as needed, presents summary with root cause and recommendation.
+
+Step 1 — Start investigation:
+```
+start_investigation(
+    problem_description="No actual data for CoCd 1110 in Dec 2024 in Consolidated Management PnL",
+    report_name="Consolidated Management PnL",
+    company_code="1110",
+    fiscal_period="2024012",
+    version="001"
+)
+```
+Result: `{"status": "started", "investigation_id": "inv_1", "next_step": {"table": "CV_ZBC_AA61", "filters": {"ZCOMPCODE": "1110", "FISCPER": "2024012"}}}`
+
+Step 2 — Check reporting table:
+```
+check_data_availability(
+    table="CV_ZBC_AA61",
+    filters={"ZCOMPCODE": "1110", "FISCPER": "2024012", "ZVERSION": "001"}
+)
+```
+Result: `{"data_found": true, "groups": [{"ZCOMPCODE": "1110", "ZSCOPE": "S_LEGAL", "CS_TRN_LC": 500000}], "totals": {"CS_TRN_LC": 500000}}`
+
+Step 3 — Record finding (using exact values from tool result):
+```
+record_finding(
+    step_name="Check reporting table",
+    result_summary="Data found in CV_ZBC_AA61 for CoCd 1110, period 2024012, version 001. 1 scope group: S_LEGAL. Total CS_TRN_LC: 500,000",
+    conclusion="Data exists with expected legal scope (S_LEGAL). Issue may be in report configuration or user filters.",
+    tool_used="check_data_availability",
+    status="normal"
+)
+```
+
+Step 4 — Get summary:
+```
+get_investigation_summary()
+```
+
+Final response uses the output format: Problem, Findings, Root Cause, Recommended Actions.
+</example>
+
+<example>
+User: "No data for company 2200 in January 2025 in CM PnL"
+
+Step 1: `start_investigation(problem_description="No data for CoCd 2200 in Jan 2025", report_name="Consolidated Management PnL", company_code="2200", fiscal_period="2025001", version="001")`
+
+Step 2: `check_data_availability(table="CV_ZBC_AA61", filters={"ZCOMPCODE": "2200", "FISCPER": "2025001", "ZVERSION": "001"})`
+Result: `{"data_found": true, "groups": [{"ZSCOPE": "S_NONE", "CS_TRN_LC": 300000}]}`
+
+Step 3: `record_finding(step_name="Check reporting table", result_summary="Data found but ALL rows have ZSCOPE=S_NONE only. Total CS_TRN_LC: 300,000", conclusion="Currency conversion was performed but consolidation stopped. Need to check ownership.", tool_used="check_data_availability", status="needs_further_check")`
+
+Step 4 — Branch to ownership check:
+`check_ownership(param_fiscper="2025001", param_cocd="2200")`
+Result: `{"result": false, "rows_found": 0}`
+
+Step 5: `record_finding(step_name="Check ownership", result_summary="Ownership NOT found for CoCd 2200 in period 2025001", conclusion="Company 2200 was removed from scope for this period. This explains the S_NONE status.", tool_used="check_ownership", status="issue_found")`
+
+Step 6: `get_investigation_summary()`
+</example>
+
+</examples>

@@ -52,12 +52,44 @@ Activate this skill when:
 
 ## Examples
 
-### Example 1: Check Report Data
+<examples>
 
+<example>
 User: "Is there actual data for company code 1110 in December 2024 in the Consolidated Management PnL report?"
-Assistant: Uses check_data_availability to query CV_ZBC_AA61 with filters for ZCOMPCODE=1110, FISCPER=2024012, ZVERSION=001.
 
-### Example 2: Verify Data for Period
+Tool call:
+```
+check_data_availability(
+    table="CV_ZBC_AA61",
+    filters={"ZCOMPCODE": "1110", "FISCPER": "2024012", "ZVERSION": "001"}
+)
+```
 
+Tool result:
+```json
+{"data_found": true, "groups": [{"ZCOMPCODE": "1110", "ZVERSION": "001", "FISCPER": "2024012", "ZSCOPE": "S_LEGAL", "CS_TRN_LC": 1234567.89}], "totals": {"CS_TRN_LC": 1234567.89}}
+```
+
+Response: "Data is available in the Consolidated Management PnL report (CV_ZBC_AA61) for company code 1110, December 2024, Actuals (version 001). The data has scope S_LEGAL with a local currency total of 1,234,567.89."
+</example>
+
+<example>
 User: "Is there any data in the BPC mart for company 2200 in June 2025?"
-Assistant: Uses check_data_availability to query CV_ZFI_AA01 with filters for ZCOMPCODE=2200, FISCPER=2025006.
+
+Tool call:
+```
+check_data_availability(
+    table="CV_ZFI_AA01",
+    filters={"ZCOMPCODE": "2200", "FISCPER": "2025006"}
+)
+```
+
+Tool result:
+```json
+{"data_found": false, "groups": [], "totals": {}}
+```
+
+Response: "No data was found in the BPC mart (CV_ZFI_AA01) for company code 2200 in June 2025 (period 2025006). The data may not have been loaded into the consolidation system yet."
+</example>
+
+</examples>

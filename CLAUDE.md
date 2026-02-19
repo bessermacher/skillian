@@ -92,15 +92,35 @@ Key patterns:
 - **Timeouts**: LLM calls and tool executions are wrapped with `asyncio.wait_for()` using configurable timeouts from settings
 - **Cached tool names**: Tool names are stored as a `frozenset` at init for O(1) lookup
 - **Playbook callback**: Business logic for auto-chaining investigation steps lives in `InvestigationPlaybook` (`app/core/playbook.py`), decoupled from the agent via a `ToolExecutor` callable
+- **RAG context injection**: The agent accepts an optional `RAGManager` and injects relevant knowledge as a system message before each user query
+
+### System Prompt Structure
+
+The base system prompt (`agent.py:_setup_system_prompt`) uses structured markdown sections following prompt engineering best practices (see `docs/prompt-engineering-audit.md`):
+
+1. **# Role** — identity and domain expertise
+2. **# Instructions** — what the agent can do and when to use tools
+3. **# Tool Usage Rules** — autonomous execution, persistence, investigation completion
+4. **# Reasoning** — think before tool calls, reflect on results
+5. **# Guardrails** — what NOT to do (never fabricate values, never call tools without required params)
+6. **# Output Format** — structured format for investigation results (Problem, Findings, Root Cause, Recommended Actions)
+7. **# Skill Domains** — auto-generated from all registered skills via `registry.get_combined_system_prompt()`
+
+Each skill domain section includes its instructions, capabilities, when-to-use guidance, and few-shot examples with concrete tool call sequences.
 
 ## Skills Architecture
 Skills live in `app/skills/<name>/` and contain:
-- `SKILL.md` — skill description and knowledge (ingested into RAG)
+- `SKILL.md` — skill description, instructions, and few-shot examples (injected into system prompt)
 - `tools.yaml` — tool definitions (name, description, parameters)
 - `tools.py` — tool implementations
 - `knowledge/` — additional markdown docs for RAG ingestion
 
 Skills are discovered and registered automatically by `app/core/registry.py` and `app/core/skill_loader.py`.
+
+### SKILL.md Prompt Conventions
+- **Instructions section**: Role definition, workflow steps, field aliases, domain reference data
+- **Examples section**: Use `<examples>` / `<example>` tags with concrete tool call sequences showing exact arguments, expected results, and responses. These are injected into the system prompt as few-shot demonstrations via `skill_parser.py:_build_instructions()`
+- Tool descriptions in `tools.yaml` should explain what the tool does, what it returns, and when to use it
 
 ### Request-scoped state
 Skill tools that maintain state (e.g. `data_investigation`) use `contextvars.ContextVar` for request-scoped isolation, preventing cross-request leakage in concurrent scenarios.
