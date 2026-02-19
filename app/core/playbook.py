@@ -3,6 +3,7 @@
 import json
 import logging
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -15,6 +16,40 @@ DEFAULT_BPC_MART_TABLE = "CV_ZFI_AA01"
 
 # Type alias for the tool executor callback
 ToolExecutor = Callable[[str, dict[str, Any]], Awaitable[str]]
+
+
+@dataclass(frozen=True)
+class _InvestigationCtx:
+    """Context passed to all branch handlers."""
+
+    table: str
+    company_code: str
+    fiscal_period: str
+    version: str
+    version_name: str
+    scopes: list[str]
+    formatted_totals: str
+
+
+async def _record(
+    execute_tool: ToolExecutor,
+    step_name: str,
+    tool_used: str,
+    result_summary: str,
+    conclusion: str,
+    status: str,
+) -> None:
+    """Record a finding with standardized structure."""
+    await execute_tool(
+        "record_finding",
+        {
+            "step_name": step_name,
+            "tool_used": tool_used,
+            "result_summary": result_summary,
+            "conclusion": conclusion,
+            "status": status,
+        },
+    )
 
 
 def _format_totals_with_currency(
@@ -91,13 +126,10 @@ class InvestigationPlaybook:
             return False
 
         filters = next_step.get("filters", {})
-        company_code = filters.get("ZCOMPCODE", "")
-        fiscal_period = filters.get("FISCPER", "")
-        table = next_step["table"]
         version = next_step.get("version", "001")
-        version_name = next_step.get("version_name", f"Version {version}")
 
         # --- Step 1: check_data_availability on reporting table ---
+        table = next_step["table"]
         check_args: dict[str, Any] = {"table": table}
         if filters:
             check_args["filters"] = filters
@@ -109,56 +141,31 @@ class InvestigationPlaybook:
         except (json.JSONDecodeError, TypeError):
             check_result = {}
 
-        data_found = check_result.get("data_found", False)
         groups = check_result.get("groups", [])
-        totals = check_result.get("totals", {})
         scopes = [g.get("ZSCOPE") for g in groups if g.get("ZSCOPE")]
+
+        ctx = _InvestigationCtx(
+            table=table,
+            company_code=filters.get("ZCOMPCODE", ""),
+            fiscal_period=filters.get("FISCPER", ""),
+            version=version,
+            version_name=next_step.get("version_name", f"Version {version}"),
+            scopes=scopes,
+            formatted_totals=_format_totals_with_currency(check_result.get("totals", {}), groups),
+        )
+
+        data_found = check_result.get("data_found", False)
         has_legal = any(s in self.legal_scopes for s in scopes)
         all_s_none = scopes and all(s == "S_NONE" for s in scopes)
 
-        formatted_totals = _format_totals_with_currency(totals, groups)
-
         if data_found and has_legal:
-            await self._handle_legal_scope(
-                execute_tool,
-                table,
-                company_code,
-                fiscal_period,
-                version,
-                version_name,
-                scopes,
-                formatted_totals,
-            )
+            await self._handle_legal_scope(execute_tool, ctx)
         elif data_found and all_s_none:
-            await self._handle_s_none(
-                execute_tool,
-                table,
-                company_code,
-                fiscal_period,
-                version,
-                version_name,
-                formatted_totals,
-            )
+            await self._handle_s_none(execute_tool, ctx)
         elif not data_found:
-            await self._handle_no_data(
-                execute_tool,
-                table,
-                company_code,
-                fiscal_period,
-                version,
-                version_name,
-            )
+            await self._handle_no_data(execute_tool, ctx)
         else:
-            await self._handle_mixed_scopes(
-                execute_tool,
-                table,
-                company_code,
-                fiscal_period,
-                version,
-                version_name,
-                scopes,
-                formatted_totals,
-            )
+            await self._handle_mixed_scopes(execute_tool, ctx)
 
         # --- Final: get_investigation_summary ---
         await execute_tool("get_investigation_summary", {})
@@ -169,75 +176,48 @@ class InvestigationPlaybook:
     # Branch handlers
     # ------------------------------------------------------------------
 
-    async def _handle_legal_scope(
-        self,
-        execute_tool: ToolExecutor,
-        table: str,
-        company_code: str,
-        fiscal_period: str,
-        version: str,
-        version_name: str,
-        scopes: list[str],
-        formatted_totals: str,
-    ) -> None:
+    async def _handle_legal_scope(self, execute_tool: ToolExecutor, ctx: _InvestigationCtx) -> None:
         """Data found with expected legal scope — END."""
-        scope_list = ", ".join(scopes)
-        legal_scopes_found = ", ".join(s for s in scopes if s in self.legal_scopes)
-        await execute_tool(
-            "record_finding",
-            {
-                "step_name": "Check reporting table",
-                "tool_used": "check_data_availability",
-                "result_summary": (
-                    f"Data found in {table} for CoCd {company_code}, "
-                    f"period {fiscal_period}, version {version} ({version_name}). "
-                    f"{len(scopes)} scope groups: {scope_list}. "
-                    f"Totals: {formatted_totals}"
-                ),
-                "conclusion": (
-                    "Data exists with expected legal consolidation scope "
-                    f"({legal_scopes_found}). "
-                    "Issue may be in report configuration or user filters."
-                ),
-                "status": "normal",
-            },
+        scope_list = ", ".join(ctx.scopes)
+        legal_found = ", ".join(s for s in ctx.scopes if s in self.legal_scopes)
+        await _record(
+            execute_tool,
+            step_name="Check reporting table",
+            tool_used="check_data_availability",
+            result_summary=(
+                f"Data found in {ctx.table} for CoCd {ctx.company_code}, "
+                f"period {ctx.fiscal_period}, version {ctx.version} ({ctx.version_name}). "
+                f"{len(ctx.scopes)} scope groups: {scope_list}. "
+                f"Totals: {ctx.formatted_totals}"
+            ),
+            conclusion=(
+                f"Data exists with expected legal consolidation scope ({legal_found}). "
+                "Issue may be in report configuration or user filters."
+            ),
+            status="normal",
         )
 
-    async def _handle_s_none(
-        self,
-        execute_tool: ToolExecutor,
-        table: str,
-        company_code: str,
-        fiscal_period: str,
-        version: str,
-        version_name: str,
-        formatted_totals: str,
-    ) -> None:
+    async def _handle_s_none(self, execute_tool: ToolExecutor, ctx: _InvestigationCtx) -> None:
         """Only S_NONE — consolidation stopped → check ownership."""
-        await execute_tool(
-            "record_finding",
-            {
-                "step_name": "Check reporting table",
-                "tool_used": "check_data_availability",
-                "result_summary": (
-                    f"Data found in {table} but only S_NONE scope. "
-                    f"CoCd {company_code}, period {fiscal_period}, "
-                    f"version {version} ({version_name}). "
-                    f"Totals: {formatted_totals}"
-                ),
-                "conclusion": (
-                    "Currency conversion ran but consolidation stopped. Checking ownership next."
-                ),
-                "status": "needs_further_check",
-            },
+        await _record(
+            execute_tool,
+            step_name="Check reporting table",
+            tool_used="check_data_availability",
+            result_summary=(
+                f"Data found in {ctx.table} but only S_NONE scope. "
+                f"CoCd {ctx.company_code}, period {ctx.fiscal_period}, "
+                f"version {ctx.version} ({ctx.version_name}). "
+                f"Totals: {ctx.formatted_totals}"
+            ),
+            conclusion=(
+                "Currency conversion ran but consolidation stopped. Checking ownership next."
+            ),
+            status="needs_further_check",
         )
 
         ownership_str = await execute_tool(
             "check_ownership",
-            {
-                "param_fiscper": fiscal_period,
-                "param_cocd": company_code,
-            },
+            {"param_fiscper": ctx.fiscal_period, "param_cocd": ctx.company_code},
         )
 
         try:
@@ -246,77 +226,56 @@ class InvestigationPlaybook:
             ownership = {}
 
         if ownership.get("result"):
-            await execute_tool(
-                "record_finding",
-                {
-                    "step_name": "Check ownership",
-                    "tool_used": "check_ownership",
-                    "result_summary": (
-                        f"Ownership found for CoCd {company_code}, "
-                        f"period {fiscal_period}. "
-                        f"{ownership.get('rows_found', 0)} rows."
-                    ),
-                    "conclusion": (
-                        "Company IS in scope. Consolidation process "
-                        "likely failed or was incomplete. "
-                        "Recommend: Re-run consolidation for this period."
-                    ),
-                    "status": "issue_found",
-                },
+            await _record(
+                execute_tool,
+                step_name="Check ownership",
+                tool_used="check_ownership",
+                result_summary=(
+                    f"Ownership found for CoCd {ctx.company_code}, "
+                    f"period {ctx.fiscal_period}. "
+                    f"{ownership.get('rows_found', 0)} rows."
+                ),
+                conclusion=(
+                    "Company IS in scope. Consolidation process "
+                    "likely failed or was incomplete. "
+                    "Recommend: Re-run consolidation for this period."
+                ),
+                status="issue_found",
             )
         else:
-            await execute_tool(
-                "record_finding",
-                {
-                    "step_name": "Check ownership",
-                    "tool_used": "check_ownership",
-                    "result_summary": (
-                        f"No ownership found for CoCd {company_code}, period {fiscal_period}."
-                    ),
-                    "conclusion": (
-                        "Company was removed from scope for this period. "
-                        "Check with consolidation team whether this is "
-                        "intentional."
-                    ),
-                    "status": "issue_found",
-                },
+            await _record(
+                execute_tool,
+                step_name="Check ownership",
+                tool_used="check_ownership",
+                result_summary=(
+                    f"No ownership found for CoCd {ctx.company_code}, period {ctx.fiscal_period}."
+                ),
+                conclusion=(
+                    "Company was removed from scope for this period. "
+                    "Check with consolidation team whether this is intentional."
+                ),
+                status="issue_found",
             )
 
-    async def _handle_no_data(
-        self,
-        execute_tool: ToolExecutor,
-        table: str,
-        company_code: str,
-        fiscal_period: str,
-        version: str,
-        version_name: str,
-    ) -> None:
+    async def _handle_no_data(self, execute_tool: ToolExecutor, ctx: _InvestigationCtx) -> None:
         """No data at all → check BPC mart."""
-        await execute_tool(
-            "record_finding",
-            {
-                "step_name": "Check reporting table",
-                "tool_used": "check_data_availability",
-                "result_summary": (
-                    f"No data found in {table} for CoCd {company_code}, "
-                    f"period {fiscal_period}, "
-                    f"version {version} ({version_name})."
-                ),
-                "conclusion": (
-                    "Data missing from reporting table entirely. Checking BPC mart next."
-                ),
-                "status": "needs_further_check",
-            },
+        await _record(
+            execute_tool,
+            step_name="Check reporting table",
+            tool_used="check_data_availability",
+            result_summary=(
+                f"No data found in {ctx.table} for CoCd {ctx.company_code}, "
+                f"period {ctx.fiscal_period}, version {ctx.version} ({ctx.version_name})."
+            ),
+            conclusion="Data missing from reporting table entirely. Checking BPC mart next.",
+            status="needs_further_check",
         )
 
         bpc_str = await execute_tool(
             "check_data_availability",
             {
                 "table": self.bpc_mart_table,
-                "filters": {
-                    "ZCOMPCODE": company_code,
-                    "FISCPER": fiscal_period,
-                },
+                "filters": {"ZCOMPCODE": ctx.company_code, "FISCPER": ctx.fiscal_period},
                 "group_by": ["ZCOMPCODE", "FISCPER"],
             },
         )
@@ -327,71 +286,56 @@ class InvestigationPlaybook:
             bpc_result = {}
 
         if bpc_result.get("data_found"):
-            await execute_tool(
-                "record_finding",
-                {
-                    "step_name": "Check BPC mart",
-                    "tool_used": "check_data_availability",
-                    "result_summary": (
-                        f"Data found in {self.bpc_mart_table} for "
-                        f"CoCd {company_code}, period {fiscal_period}."
-                    ),
-                    "conclusion": (
-                        "Data exists in BPC mart but not in reporting. "
-                        "Reporting data load likely not triggered. "
-                        "Recommend: Trigger reporting refresh or check "
-                        "data load logs."
-                    ),
-                    "status": "issue_found",
-                },
+            await _record(
+                execute_tool,
+                step_name="Check BPC mart",
+                tool_used="check_data_availability",
+                result_summary=(
+                    f"Data found in {self.bpc_mart_table} for "
+                    f"CoCd {ctx.company_code}, period {ctx.fiscal_period}."
+                ),
+                conclusion=(
+                    "Data exists in BPC mart but not in reporting. "
+                    "Reporting data load likely not triggered. "
+                    "Recommend: Trigger reporting refresh or check data load logs."
+                ),
+                status="issue_found",
             )
         else:
-            await execute_tool(
-                "record_finding",
-                {
-                    "step_name": "Check BPC mart",
-                    "tool_used": "check_data_availability",
-                    "result_summary": (
-                        f"No data found in {self.bpc_mart_table} for "
-                        f"CoCd {company_code}, period {fiscal_period}."
-                    ),
-                    "conclusion": (
-                        "Data missing from consolidation entirely. "
-                        "The issue is upstream of the BPC mart. "
-                        "Recommend: Check source data loads into BPC."
-                    ),
-                    "status": "issue_found",
-                },
+            await _record(
+                execute_tool,
+                step_name="Check BPC mart",
+                tool_used="check_data_availability",
+                result_summary=(
+                    f"No data found in {self.bpc_mart_table} for "
+                    f"CoCd {ctx.company_code}, period {ctx.fiscal_period}."
+                ),
+                conclusion=(
+                    "Data missing from consolidation entirely. "
+                    "The issue is upstream of the BPC mart. "
+                    "Recommend: Check source data loads into BPC."
+                ),
+                status="issue_found",
             )
 
     async def _handle_mixed_scopes(
-        self,
-        execute_tool: ToolExecutor,
-        table: str,
-        company_code: str,
-        fiscal_period: str,
-        version: str,
-        version_name: str,
-        scopes: list[str],
-        formatted_totals: str,
+        self, execute_tool: ToolExecutor, ctx: _InvestigationCtx
     ) -> None:
         """Data found with mixed/unknown scopes."""
-        scope_list = ", ".join(scopes) if scopes else "none"
-        await execute_tool(
-            "record_finding",
-            {
-                "step_name": "Check reporting table",
-                "tool_used": "check_data_availability",
-                "result_summary": (
-                    f"Data found in {table} with scopes: {scope_list}. "
-                    f"CoCd {company_code}, period {fiscal_period}, "
-                    f"version {version} ({version_name}). "
-                    f"Totals: {formatted_totals}"
-                ),
-                "conclusion": (
-                    f"Data exists with non-standard scopes ({scope_list}). "
-                    "Further manual investigation may be needed."
-                ),
-                "status": "needs_further_check",
-            },
+        scope_list = ", ".join(ctx.scopes) if ctx.scopes else "none"
+        await _record(
+            execute_tool,
+            step_name="Check reporting table",
+            tool_used="check_data_availability",
+            result_summary=(
+                f"Data found in {ctx.table} with scopes: {scope_list}. "
+                f"CoCd {ctx.company_code}, period {ctx.fiscal_period}, "
+                f"version {ctx.version} ({ctx.version_name}). "
+                f"Totals: {ctx.formatted_totals}"
+            ),
+            conclusion=(
+                f"Data exists with non-standard scopes ({scope_list}). "
+                "Further manual investigation may be needed."
+            ),
+            status="needs_further_check",
         )

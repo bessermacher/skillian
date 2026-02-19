@@ -83,15 +83,20 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         return self.env == "production"
 
+    _PROVIDER_API_KEYS: dict[str, str] = {
+        "anthropic": "anthropic_api_key",
+        "openai": "openai_api_key",
+        "custom_openai": "custom_openai_api_key",
+    }
+
     @model_validator(mode="after")
     def validate_provider_config(self) -> Self:
         """Validate that required API keys are present for the selected provider."""
-        if self.llm_provider == "anthropic" and not self.anthropic_api_key:
-            raise ValueError("ANTHROPIC_API_KEY is required when LLM_PROVIDER=anthropic")
-        if self.llm_provider == "openai" and not self.openai_api_key:
-            raise ValueError("OPENAI_API_KEY is required when LLM_PROVIDER=openai")
-        if self.llm_provider == "custom_openai" and not self.custom_openai_api_key:
-            raise ValueError("CUSTOM_OPENAI_API_KEY is required when LLM_PROVIDER=custom_openai")
+        key_field = self._PROVIDER_API_KEYS.get(self.llm_provider)
+        if key_field and not getattr(self, key_field):
+            raise ValueError(
+                f"{key_field.upper()} is required when LLM_PROVIDER={self.llm_provider}"
+            )
         return self
 
     @model_validator(mode="after")

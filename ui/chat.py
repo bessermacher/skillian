@@ -153,9 +153,7 @@ if prompt := st.chat_input("Ask about SAP BW data issues..."):
                             tool_name = data.get("tool", "unknown")
                             result = data.get("result", "")
                             duration = data.get("duration_seconds", 0)
-                            st.write(
-                                f"Got result from **{tool_name}** in **{duration:.1f}s**"
-                            )
+                            st.write(f"Got result from **{tool_name}** in **{duration:.1f}s**")
                             tool_calls.append(
                                 {
                                     "tool": tool_name,
@@ -207,10 +205,7 @@ if prompt := st.chat_input("Ask about SAP BW data issues..."):
                                 f"{llm['duration_seconds']:.1f}s"
                             )
                         for tc in timing_info.get("tool_calls", []):
-                            st.write(
-                                f"Tool `{tc['tool']}`: "
-                                f"{tc['duration_seconds']:.1f}s"
-                            )
+                            st.write(f"Tool `{tc['tool']}`: {tc['duration_seconds']:.1f}s")
 
                 # Show tool calls in an expander
                 if tool_calls:

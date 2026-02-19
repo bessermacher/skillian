@@ -107,89 +107,50 @@ def _build_tool(
     )
 
 
+def _build_field(
+    param_config: dict[str, Any],
+    *,
+    required: bool = False,
+    parent_name: str = "",
+) -> tuple[type, Any]:
+    """Build a single Pydantic (annotation, Field) tuple from a parameter config."""
+    description = param_config.get("description", "")
+    default = param_config.get("default")
+
+    # Handle nested objects recursively
+    if param_config.get("type") == "object" and "properties" in param_config:
+        nested = _build_input_schema(
+            parent_name,
+            [{"name": k, **v} for k, v in param_config["properties"].items()],
+        )
+        if required:
+            return (nested, Field(description=description))
+        return (nested | None, Field(default=None, description=description))
+
+    param_type = _get_python_type(param_config.get("type", "string"))
+
+    if required:
+        return (param_type, Field(description=description))
+    if default is not None:
+        return (param_type, Field(default=default, description=description))
+    return (param_type | None, Field(default=None, description=description))
+
+
 def _build_input_schema(
     tool_name: str,
     parameters: list[dict[str, Any]],
 ) -> type[BaseModel]:
-    """Build a Pydantic model from parameter definitions.
-
-    Args:
-        tool_name: Name of the tool (for model naming)
-        parameters: List of parameter configs
-
-    Returns:
-        Pydantic BaseModel class
-    """
-    # Build field definitions
-    fields: dict[str, tuple[type, Any]] = {}
-
-    for param in parameters:
-        param_name = param["name"]
-        param_type = _get_python_type(param.get("type", "string"))
-        required = param.get("required", False)
-        description = param.get("description", "")
-        default = param.get("default")
-
-        # Handle nested objects
-        if param.get("type") == "object" and "properties" in param:
-            nested_schema = _build_nested_schema(
-                f"{tool_name}_{param_name}",
-                param["properties"],
-            )
-            if required:
-                fields[param_name] = (nested_schema, Field(description=description))
-            else:
-                fields[param_name] = (
-                    nested_schema | None,
-                    Field(default=None, description=description),
-                )
-            continue
-
-        # Build field
-        if required:
-            fields[param_name] = (param_type, Field(description=description))
-        elif default is not None:
-            fields[param_name] = (param_type, Field(default=default, description=description))
-        else:
-            fields[param_name] = (
-                param_type | None,
-                Field(default=None, description=description),
-            )
-
-    # Create dynamic model
+    """Build a Pydantic model from parameter definitions."""
+    fields = {
+        param["name"]: _build_field(
+            param,
+            required=param.get("required", False),
+            parent_name=f"{tool_name}_{param['name']}",
+        )
+        for param in parameters
+    }
     model_name = "".join(word.capitalize() for word in tool_name.split("_")) + "Input"
     return create_model(model_name, **fields)
-
-
-def _build_nested_schema(
-    name: str,
-    properties: dict[str, Any],
-) -> type[BaseModel]:
-    """Build a nested Pydantic model from properties.
-
-    Args:
-        name: Model name
-        properties: Property definitions
-
-    Returns:
-        Pydantic BaseModel class
-    """
-    fields: dict[str, tuple[type, Any]] = {}
-
-    for prop_name, prop_config in properties.items():
-        prop_type = _get_python_type(prop_config.get("type", "string"))
-        description = prop_config.get("description", "")
-        default = prop_config.get("default")
-
-        if default is not None:
-            fields[prop_name] = (prop_type, Field(default=default, description=description))
-        else:
-            fields[prop_name] = (
-                prop_type | None,
-                Field(default=None, description=description),
-            )
-
-    return create_model(name, **fields)
 
 
 def _get_python_type(type_str: str) -> type:

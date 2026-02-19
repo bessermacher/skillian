@@ -276,6 +276,49 @@ present the final summary as text.
         """Check if start_investigation was called."""
         return any(tc["tool"] == "start_investigation" for tc in tool_calls_made)
 
+    def _select_nudge(
+        self,
+        content: str,
+        response: Any,
+        tool_calls_made: list[dict[str, Any]],
+    ) -> str | None:
+        """Return a nudge message if the LLM needs redirection, else None."""
+        # Invalid (malformed) tool calls
+        if hasattr(response, "invalid_tool_calls") and response.invalid_tool_calls:
+            invalid_names = [tc.get("name", "unknown") for tc in response.invalid_tool_calls]
+            logger.warning("LLM made invalid tool calls: %s. Nudging.", invalid_names)
+            return (
+                "Your tool call(s) were malformed and could not be parsed "
+                f"(tools: {', '.join(invalid_names)}). Please retry the "
+                "tool call(s) with correct JSON arguments."
+            )
+
+        # Tool calls written as text
+        if self._looks_like_tool_calls(content):
+            logger.warning("LLM output tool-call-like text. Nudging.")
+            return _TOOL_CALL_NUDGE
+
+        # Investigation started but not completed
+        if self._investigation_incomplete(tool_calls_made):
+            nudge = self._get_investigation_nudge(tool_calls_made)
+            logger.warning("Investigation incomplete. Nudging: %s", nudge)
+            return nudge
+
+        # LLM described a tool call during investigation
+        if (
+            self._investigation_started(tool_calls_made)
+            and self._mentions_tools(content)
+            and not self._investigation_completed(tool_calls_made)
+        ):
+            logger.warning("LLM mentioned tools in text during investigation. Nudging.")
+            return _CONTINUE_NUDGE
+
+        # Empty content after tool calls
+        if not content.strip() and tool_calls_made:
+            return self._build_summarise_nudge(tool_calls_made)
+
+        return None
+
     def _get_investigation_nudge(self, tool_calls_made: list[dict[str, Any]]) -> str:
         """Build a context-aware nudge based on investigation progress."""
         tools_called = {tc["tool"] for tc in tool_calls_made}
@@ -297,6 +340,29 @@ present the final summary as text.
             + "Call get_investigation_summary NOW to present the final results."
         )
 
+    async def _track_tool_call(
+        self,
+        tool_name: str,
+        tool_args: dict[str, Any],
+        tool_calls_made: list[dict[str, Any]],
+        tool_timings: list[dict[str, Any]],
+    ) -> tuple[str, float]:
+        """Execute a tool, record timing and call data. Returns (result, duration)."""
+        tool_start = time.perf_counter()
+        result = await self._execute_tool(tool_name, tool_args)
+        duration = round(time.perf_counter() - tool_start, 3)
+
+        tool_timings.append({"tool": tool_name, "duration_seconds": duration})
+        tool_calls_made.append(
+            {
+                "tool": tool_name,
+                "args": tool_args,
+                "result": result,
+                "duration_seconds": duration,
+            }
+        )
+        return result, duration
+
     async def _auto_execute_tool(
         self,
         tool_name: str,
@@ -309,36 +375,11 @@ present the final summary as text.
 
         self.conversation.add_assistant(
             content="",
-            tool_calls=[
-                {
-                    "name": tool_name,
-                    "args": tool_args,
-                    "id": call_id,
-                }
-            ],
+            tool_calls=[{"name": tool_name, "args": tool_args, "id": call_id}],
         )
 
-        tool_start = time.perf_counter()
-        result = await self._execute_tool(tool_name, tool_args)
-        tool_duration = time.perf_counter() - tool_start
-
-        tool_timings.append(
-            {
-                "tool": tool_name,
-                "duration_seconds": round(tool_duration, 3),
-            }
-        )
-
+        result, _ = await self._track_tool_call(tool_name, tool_args, tool_calls_made, tool_timings)
         self.conversation.add_tool_result(result, call_id)
-
-        tool_calls_made.append(
-            {
-                "tool": tool_name,
-                "args": tool_args,
-                "result": result,
-                "duration_seconds": round(tool_duration, 3),
-            }
-        )
 
         logger.info("Auto-chained %s", tool_name)
         return result
@@ -449,29 +490,17 @@ present the final summary as text.
                         "data": {"tool": tool_name, "args": tool_args},
                     }
 
-                    tool_start = time.perf_counter()
-                    result = await self._execute_tool(tool_name, tool_args)
-                    tool_duration = round(time.perf_counter() - tool_start, 3)
-
-                    tool_timings.append({"tool": tool_name, "duration_seconds": tool_duration})
-
-                    self.conversation.add_tool_result(result, tool_id)
-
-                    tool_calls_made.append(
-                        {
-                            "tool": tool_name,
-                            "args": tool_args,
-                            "result": result,
-                            "duration_seconds": tool_duration,
-                        }
+                    result, duration = await self._track_tool_call(
+                        tool_name, tool_args, tool_calls_made, tool_timings
                     )
+                    self.conversation.add_tool_result(result, tool_id)
 
                     yield {
                         "event": "tool_result",
                         "data": {
                             "tool": tool_name,
                             "result": result,
-                            "duration_seconds": tool_duration,
+                            "duration_seconds": duration,
                         },
                     }
 
@@ -512,63 +541,8 @@ present the final summary as text.
                     list(getattr(response, "additional_kwargs", {}).keys()),
                 )
 
-            # Invalid (malformed) tool calls
-            if hasattr(response, "invalid_tool_calls") and response.invalid_tool_calls:
-                invalid_names = [tc.get("name", "unknown") for tc in response.invalid_tool_calls]
-                logger.warning(
-                    "Iteration %d: LLM made invalid tool calls: %s. Nudging to retry.",
-                    iterations,
-                    invalid_names,
-                )
-                self.conversation.add_assistant(content)
-                self.conversation.add_user(
-                    "Your tool call(s) were malformed and could not be parsed "
-                    f"(tools: {', '.join(invalid_names)}). Please retry the "
-                    "tool call(s) with correct JSON arguments."
-                )
-                continue
-
-            # Tool calls written as text
-            if self._looks_like_tool_calls(content):
-                logger.warning(
-                    "Iteration %d: LLM output tool-call-like text instead of "
-                    "structured tool calls. Nudging to retry.",
-                    iterations,
-                )
-                self.conversation.add_assistant(content)
-                self.conversation.add_user(_TOOL_CALL_NUDGE)
-                continue
-
-            # Investigation started but not completed
-            if self._investigation_incomplete(tool_calls_made):
-                nudge = self._get_investigation_nudge(tool_calls_made)
-                logger.warning(
-                    "Iteration %d: Investigation incomplete. Nudging: %s",
-                    iterations,
-                    nudge,
-                )
-                self.conversation.add_assistant(content)
-                self.conversation.add_user(nudge)
-                continue
-
-            # LLM described a tool call during investigation
-            if (
-                self._investigation_started(tool_calls_made)
-                and self._mentions_tools(content)
-                and not self._investigation_completed(tool_calls_made)
-            ):
-                logger.warning(
-                    "Iteration %d: LLM mentioned tools in text after prior tool "
-                    "calls. Nudging to continue.",
-                    iterations,
-                )
-                self.conversation.add_assistant(content)
-                self.conversation.add_user(_CONTINUE_NUDGE)
-                continue
-
-            # Empty content after tool calls — nudge to summarise
-            if not content.strip() and tool_calls_made:
-                nudge = self._build_summarise_nudge(tool_calls_made)
+            nudge = self._select_nudge(content, response, tool_calls_made)
+            if nudge is not None:
                 self.conversation.add_assistant(content)
                 self.conversation.add_user(nudge)
                 continue
