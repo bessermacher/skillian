@@ -113,7 +113,7 @@ class DatasphereConnector:
             DatasphereQueryError: If query execution fails
         """
         if self._connection is None:
-            raise DatasphereError("Connector not connected. Call connect() first.")
+            await self.connect()
 
         loop = asyncio.get_event_loop()
         try:
@@ -163,7 +163,7 @@ class DatasphereConnector:
             Number of affected rows
         """
         if self._connection is None:
-            raise DatasphereError("Connector not connected. Call connect() first.")
+            await self.connect()
 
         loop = asyncio.get_event_loop()
         try:

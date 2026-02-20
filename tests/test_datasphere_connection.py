@@ -240,22 +240,25 @@ class TestHealthCheck:
 
 
 class TestNotConnectedErrors:
+    """Auto-connect: methods attempt to connect lazily, so they raise
+    DatasphereConnectionError (not "not connected") when credentials are invalid."""
+
     @pytest.mark.asyncio
-    async def test_execute_sql_requires_connection(self, connector):
-        with pytest.raises(DatasphereError, match="not connected"):
+    async def test_execute_sql_auto_connects(self, connector):
+        with pytest.raises(DatasphereConnectionError, match="Connection failed"):
             await connector.execute_sql("SELECT 1")
 
     @pytest.mark.asyncio
-    async def test_execute_many_requires_connection(self, connector):
-        with pytest.raises(DatasphereError, match="not connected"):
+    async def test_execute_many_auto_connects(self, connector):
+        with pytest.raises(DatasphereConnectionError, match="Connection failed"):
             await connector.execute_many("INSERT INTO t VALUES (?)", [(1,)])
 
     @pytest.mark.asyncio
-    async def test_get_tables_requires_connection(self, connector):
-        with pytest.raises(DatasphereError, match="not connected"):
+    async def test_get_tables_auto_connects(self, connector):
+        with pytest.raises(DatasphereConnectionError, match="Connection failed"):
             await connector.get_tables()
 
     @pytest.mark.asyncio
-    async def test_get_columns_requires_connection(self, connector):
-        with pytest.raises(DatasphereError, match="not connected"):
+    async def test_get_columns_auto_connects(self, connector):
+        with pytest.raises(DatasphereConnectionError, match="Connection failed"):
             await connector.get_columns("some_table")
