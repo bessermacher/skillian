@@ -1,5 +1,6 @@
 """Tests for API endpoints."""
 
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -138,6 +139,85 @@ class TestChatEndpoint:
             json={"message": ""},
         )
         assert response.status_code == 422  # Validation error
+
+
+class TestListSessionsEndpoint:
+    def test_list_sessions_empty(self, client):
+        """List sessions returns empty list when no sessions exist."""
+        from app.api.sessions import SessionStore
+        from app.dependencies import get_session_store
+
+        mock_session_store = MagicMock(spec=SessionStore)
+        mock_session_store.list_all = AsyncMock(return_value=[])
+
+        app.dependency_overrides[get_session_store] = lambda: mock_session_store
+
+        try:
+            response = client.get(f"{API_V1}/sessions")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["sessions"] == []
+        finally:
+            app.dependency_overrides.pop(get_session_store, None)
+
+    def test_list_sessions_returns_sessions(self, client):
+        """List sessions returns all sessions with correct fields."""
+        from app.api.sessions import SessionInfo, SessionStore
+        from app.dependencies import get_session_store
+
+        now = datetime(2026, 1, 15, 10, 30, 0)
+        mock_sessions = [
+            SessionInfo(
+                session_id="session-aaa",
+                created_at=now,
+                message_count=3,
+            ),
+            SessionInfo(
+                session_id="session-bbb",
+                created_at=now,
+                message_count=0,
+            ),
+        ]
+
+        mock_session_store = MagicMock(spec=SessionStore)
+        mock_session_store.list_all = AsyncMock(return_value=mock_sessions)
+
+        app.dependency_overrides[get_session_store] = lambda: mock_session_store
+
+        try:
+            response = client.get(f"{API_V1}/sessions")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert len(data["sessions"]) == 2
+
+            first = data["sessions"][0]
+            assert first["session_id"] == "session-aaa"
+            assert first["message_count"] == 3
+            assert first["created_at"] == now.isoformat()
+
+            second = data["sessions"][1]
+            assert second["session_id"] == "session-bbb"
+            assert second["message_count"] == 0
+        finally:
+            app.dependency_overrides.pop(get_session_store, None)
+
+    def test_list_sessions_calls_list_all(self, client):
+        """Verify the endpoint calls session_store.list_all exactly once."""
+        from app.api.sessions import SessionStore
+        from app.dependencies import get_session_store
+
+        mock_session_store = MagicMock(spec=SessionStore)
+        mock_session_store.list_all = AsyncMock(return_value=[])
+
+        app.dependency_overrides[get_session_store] = lambda: mock_session_store
+
+        try:
+            client.get(f"{API_V1}/sessions")
+            mock_session_store.list_all.assert_awaited_once()
+        finally:
+            app.dependency_overrides.pop(get_session_store, None)
 
 
 class TestSessionEndpoints:

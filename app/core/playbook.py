@@ -65,9 +65,9 @@ def _format_totals_with_currency(
 
     parts: list[str] = []
     if "CS_TRN_LC" in totals:
-        parts.append(f"LC: {totals['CS_TRN_LC']:,.2f} {lc_label}")
+        parts.append(f"LC: {float(totals['CS_TRN_LC']):,.2f} {lc_label}")
     if "CS_TRN_GC" in totals:
-        parts.append(f"GC: {totals['CS_TRN_GC']:,.2f} {gc_label}")
+        parts.append(f"GC: {float(totals['CS_TRN_GC']):,.2f} {gc_label}")
     for key, value in totals.items():
         if key not in ("CS_TRN_LC", "CS_TRN_GC"):
             parts.append(f"{key}: {value}")
